@@ -17,11 +17,14 @@ cc_binary {
     "utils/thermal_files.cpp",
     "utils/thermal_watcher.cpp",
   ],
+  static_libs: [
+    "libjsoncpp",
+  ],
   shared_libs: [
     "libbase",
     "libcutils",
     "libhidlbase",
-    "libjsoncpp",
+    "libhidltransport",
     "libutils",
     "android.hardware.thermal@1.0",
     "android.hardware.thermal@2.0",
