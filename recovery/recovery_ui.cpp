@@ -98,17 +98,12 @@ class PixelDevice : public ::Device {
     /** Hook to wipe user data not stored in /data */
     bool PostWipeData() override {
         // Try to do everything but report a failure if anything wasn't successful
-        bool totalSuccess = false;
+        bool totalSuccess = true;
         ::RecoveryUI* const ui = GetUI();
 
         ui->Print("Wiping Titan M...\n");
-
-        uint32_t retries = 5;
-        while (retries--) {
-            if (WipeTitanM()) {
-                totalSuccess = true;
-                break;
-            }
+        if (!WipeTitanM()) {
+            totalSuccess = false;
         }
 
         if (!WipeProvisionedFlag()) {
