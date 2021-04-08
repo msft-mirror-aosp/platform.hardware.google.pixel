@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "android.hardware.power.stats-service.pixel"
-
 #include "include/PowerStatsAidl.h"
 #include <aidl/android/hardware/power/stats/BnPowerStats.h>
 
@@ -42,15 +40,19 @@ void PowerStats::addStateResidencyDataProvider(std::unique_ptr<IStateResidencyDa
     }
 
     int32_t id = mPowerEntityInfos.size();
+    auto info = p->getInfo();
 
-    for (const auto &[entityName, states] : p->getInfo()) {
+    size_t index = mStateResidencyDataProviders.size();
+    mStateResidencyDataProviders.emplace_back(std::move(p));
+
+    for (const auto &[entityName, states] : info) {
         PowerEntity i = {
                 .id = id++,
                 .name = entityName,
                 .states = states,
         };
         mPowerEntityInfos.emplace_back(i);
-        mStateResidencyDataProviders.emplace_back(std::move(p));
+        mStateResidencyDataProviderIndex.emplace_back(index);
     }
 }
 
@@ -83,7 +85,8 @@ ndk::ScopedAStatus PowerStats::getStateResidency(const std::vector<int32_t> &in_
         // Check to see if we already have data for the given id
         std::string powerEntityName = mPowerEntityInfos[id].name;
         if (stateResidencies.find(powerEntityName) == stateResidencies.end()) {
-            mStateResidencyDataProviders[id]->getStateResidencies(&stateResidencies);
+            mStateResidencyDataProviders.at(mStateResidencyDataProviderIndex.at(id))
+                    ->getStateResidencies(&stateResidencies);
         }
 
         // Append results if we have them
