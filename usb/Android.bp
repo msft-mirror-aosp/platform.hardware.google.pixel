@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
 cc_library_static {
     name: "libpixelusb",
     vendor_available: true,
@@ -36,4 +40,29 @@ cc_library_static {
         "libhidlbase",
         "libutils",
     ],
+}
+
+cc_fuzz {
+    name: "libpixelusb_gadgetutils_fuzzer",
+
+    srcs:[
+        "UsbGadgetUtils_fuzz.cpp"
+    ],
+
+    shared_libs: [
+        "android.hardware.usb.gadget@1.0",
+        "libbase",
+    ],
+
+    static_libs: [
+        "libpixelusb",
+    ],
+
+    fuzz_config: {
+        cc: [
+            "pixel-usb-triage@google.com",
+            "kyletso@google.com",
+        ],
+        componentid: 175220,
+    },
 }
