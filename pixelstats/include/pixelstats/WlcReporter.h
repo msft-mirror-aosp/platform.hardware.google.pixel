@@ -17,34 +17,37 @@
 #ifndef HARDWARE_GOOGLE_PIXEL_PIXELSTATS_WLCREPORTER_H
 #define HARDWARE_GOOGLE_PIXEL_PIXELSTATS_WLCREPORTER_H
 
-#include <android/frameworks/stats/1.0/IStats.h>
-#include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
-
-using android::frameworks::stats::V1_0::IStats;
+#include <aidl/android/frameworks/stats/IStats.h>
+#include <utils/RefBase.h>
 
 namespace android {
 namespace hardware {
 namespace google {
 namespace pixel {
 
+using aidl::android::frameworks::stats::IStats;
+
 /**
  * A class to upload wireless metrics
  */
 class WlcReporter : public RefBase {
   public:
-    /* checkAndReport
-     * isWirelessChargingLast: last wireless charge state
-     *                             true, for wireless charging
-     * Return: current wireless charge state
-     */
-    bool checkAndReport(bool isWirelessChargingLast);
-    bool isWlcSupported();
+    void checkAndReport(const std::shared_ptr<IStats> &stats_client, const bool online,
+                        const char *ptmc_uevent);
 
   private:
-    bool isWlcOnline();
-    bool readFileToInt(const char *path, int *val);
+    struct WlcStatus {
+        bool is_charging;
+        bool check_charger_vendor_id;
+        int check_vendor_id_attempts;
+        WlcStatus();
+    };
+    WlcStatus wlc_status_;
 
-    void doLog();
+    void checkVendorId(const std::shared_ptr<IStats> &stats_client, const char *ptmc_uevent);
+
+    void reportOrientation(const std::shared_ptr<IStats> &stats_client);
+    bool reportVendor(const std::shared_ptr<IStats> &stats_client, const char *ptmc_uevent);
     // Translate device orientation value from sensor Hal to atom enum value
     int translateDeviceOrientationToAtomValue(int orientation);
 
@@ -52,7 +55,9 @@ class WlcReporter : public RefBase {
     // store everything in the values array at the index of the field number
     // -2.
     const int kVendorAtomOffset = 2;
-    int readPtmcId();
+    const int kMaxVendorIdAttempts = 5;
+
+    int readPtmcId(const char *ptmc_uevent);
 };
 
 }  // namespace pixel
