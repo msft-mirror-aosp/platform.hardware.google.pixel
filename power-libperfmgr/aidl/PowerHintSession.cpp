@@ -21,11 +21,9 @@
 #include <android-base/parsedouble.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
-#include <log/log.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <utils/Trace.h>
-
-#include <sys/syscall.h>
 
 #include "PowerHintSession.h"
 #include "PowerSessionManager.h"
@@ -49,10 +47,12 @@ constexpr char kPowerHalAdpfPidIClamp[] = "vendor.powerhal.adpf.pid.i_clamp";
 constexpr char kPowerHalAdpfPidD[] = "vendor.powerhal.adpf.pid.d";
 constexpr char kPowerHalAdpfPidInitialIntegral[] = "vendor.powerhal.adpf.pid.i_init";
 constexpr char kPowerHalAdpfUclampEnable[] = "vendor.powerhal.adpf.uclamp";
-constexpr char kPowerHalAdpfUclampCapRatio[] = "vendor.powerhal.adpf.uclamp.cap_ratio";
+constexpr char kPowerHalAdpfUclampBoostCap[] = "vendor.powerhal.adpf.uclamp.boost_cap";
 constexpr char kPowerHalAdpfUclampGranularity[] = "vendor.powerhal.adpf.uclamp.granularity";
 constexpr char kPowerHalAdpfStaleTimeFactor[] = "vendor.powerhal.adpf.stale_timeout_factor";
-constexpr char kPowerHalAdpfSamplingWindow[] = "vendor.powerhal.adpf.sampling_window";
+constexpr char kPowerHalAdpfPSamplingWindow[] = "vendor.powerhal.adpf.p.window";
+constexpr char kPowerHalAdpfISamplingWindow[] = "vendor.powerhal.adpf.i.window";
+constexpr char kPowerHalAdpfDSamplingWindow[] = "vendor.powerhal.adpf.d.window";
 
 namespace {
 /* there is no glibc or bionic wrapper */
@@ -77,31 +77,6 @@ static int sched_setattr(int pid, struct sched_attr *attr, unsigned int flags) {
         return 0;
     }
     return syscall(__NR_sched_setattr, pid, attr, flags);
-}
-
-static inline void TRACE_ADPF_PID(uintptr_t session_id, int32_t uid, int32_t tgid, uint64_t count,
-                                  int64_t err, int64_t integral, int64_t previous, int64_t p,
-                                  int64_t i, int64_t d, int32_t output) {
-    if (ATRACE_ENABLED()) {
-        const std::string idstr = StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR, tgid, uid,
-                                               session_id & 0xffff);
-        std::string sz = StringPrintf("%s-pid.count", idstr.c_str());
-        ATRACE_INT(sz.c_str(), count);
-        sz = StringPrintf("%s-pid.err", idstr.c_str());
-        ATRACE_INT(sz.c_str(), err);
-        sz = StringPrintf("%s-pid.accu", idstr.c_str());
-        ATRACE_INT(sz.c_str(), integral);
-        sz = StringPrintf("%s-pid.prev", idstr.c_str());
-        ATRACE_INT(sz.c_str(), previous);
-        sz = StringPrintf("%s-pid.pOut", idstr.c_str());
-        ATRACE_INT(sz.c_str(), p);
-        sz = StringPrintf("%s-pid.iOut", idstr.c_str());
-        ATRACE_INT(sz.c_str(), i);
-        sz = StringPrintf("%s-pid.dOut", idstr.c_str());
-        ATRACE_INT(sz.c_str(), d);
-        sz = StringPrintf("%s-pid.output", idstr.c_str());
-        ATRACE_INT(sz.c_str(), output);
-    }
 }
 
 static inline int64_t ns_to_100us(int64_t ns) {
@@ -130,14 +105,18 @@ static const int64_t sPidIClamp =
                      : std::abs(static_cast<int64_t>(::android::base::GetIntProperty<int64_t>(
                                                              kPowerHalAdpfPidIClamp, 512) /
                                                      sPidI));
-static const int sUclampCap =
-        static_cast<int>(getDoubleProperty(kPowerHalAdpfUclampCapRatio, 0.5) * 1024);
+static const int32_t sUclampCap =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampBoostCap, 512);
 static const uint32_t sUclampGranularity =
         ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampGranularity, 5);
 static const int64_t sStaleTimeFactor =
-        ::android::base::GetIntProperty<int64_t>(kPowerHalAdpfStaleTimeFactor, 20);
-static const size_t sSamplingWindow =
-        ::android::base::GetUintProperty<size_t>(kPowerHalAdpfSamplingWindow, 0);
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfStaleTimeFactor, 20);
+static const int64_t sPSamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfPSamplingWindow, 1);
+static const int64_t sISamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfISamplingWindow, 0);
+static const int64_t sDSamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfDSamplingWindow, 1);
 
 }  // namespace
 
@@ -151,12 +130,14 @@ PowerHintSession::PowerHintSession(int32_t tgid, int32_t uid, const std::vector<
 
     if (ATRACE_ENABLED()) {
         const std::string idstr = getIdString();
-        std::string sz = StringPrintf("%s-target", idstr.c_str());
+        std::string sz = StringPrintf("adpf.%s-target", idstr.c_str());
         ATRACE_INT(sz.c_str(), (int64_t)mDescriptor->duration.count());
-        sz = StringPrintf("%s-active", idstr.c_str());
+        sz = StringPrintf("adpf.%s-active", idstr.c_str());
         ATRACE_INT(sz.c_str(), mDescriptor->is_active.load());
     }
     PowerSessionManager::getInstance()->addPowerSession(this);
+    // init boost
+    setUclamp(sUclampCap, 1024);
     ALOGV("PowerHintSession created: %s", mDescriptor->toString().c_str());
 }
 
@@ -165,11 +146,11 @@ PowerHintSession::~PowerHintSession() {
     ALOGV("PowerHintSession deleted: %s", mDescriptor->toString().c_str());
     if (ATRACE_ENABLED()) {
         const std::string idstr = getIdString();
-        std::string sz = StringPrintf("%s-target", idstr.c_str());
+        std::string sz = StringPrintf("adpf.%s-target", idstr.c_str());
         ATRACE_INT(sz.c_str(), 0);
-        sz = StringPrintf("%s-actl_last", idstr.c_str());
+        sz = StringPrintf("adpf.%s-actl_last", idstr.c_str());
         ATRACE_INT(sz.c_str(), 0);
-        sz = sz = StringPrintf("%s-active", idstr.c_str());
+        sz = sz = StringPrintf("adpf.%s-active", idstr.c_str());
         ATRACE_INT(sz.c_str(), 0);
     }
     delete mDescriptor;
@@ -192,9 +173,8 @@ int PowerHintSession::setUclamp(int32_t min, int32_t max) {
     max = std::max(0, max);
     max = std::max(min, max);
     if (ATRACE_ENABLED()) {
-        std::string sz =
-                StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-min", mDescriptor->tgid,
-                             mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-min", idstr.c_str());
         ATRACE_INT(sz.c_str(), min);
     }
     for (const auto tid : mDescriptor->threadIds) {
@@ -221,9 +201,8 @@ ndk::ScopedAStatus PowerHintSession::pause() {
     setUclamp(0, 1024);
     mDescriptor->is_active.store(false);
     if (ATRACE_ENABLED()) {
-        std::string sz =
-                StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-active", mDescriptor->tgid,
-                             mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-active", idstr.c_str());
         ATRACE_INT(sz.c_str(), mDescriptor->is_active.load());
     }
     updateUniveralBoostMode();
@@ -235,10 +214,11 @@ ndk::ScopedAStatus PowerHintSession::resume() {
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     mDescriptor->is_active.store(true);
     mDescriptor->integral_error = std::max(sPidIInit, mDescriptor->integral_error);
+    // resume boost
+    setUclamp(sUclampCap, 1024);
     if (ATRACE_ENABLED()) {
-        std::string sz =
-                StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-active", mDescriptor->tgid,
-                             mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-active", idstr.c_str());
         ATRACE_INT(sz.c_str(), mDescriptor->is_active.load());
     }
     updateUniveralBoostMode();
@@ -267,9 +247,8 @@ ndk::ScopedAStatus PowerHintSession::updateTargetWorkDuration(int64_t targetDura
 
     mDescriptor->duration = std::chrono::nanoseconds(targetDurationNanos);
     if (ATRACE_ENABLED()) {
-        std::string sz =
-                StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-target", mDescriptor->tgid,
-                             mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-target", idstr.c_str());
         ATRACE_INT(sz.c_str(), (int64_t)mDescriptor->duration.count());
     }
 
@@ -292,20 +271,24 @@ ndk::ScopedAStatus PowerHintSession::reportActualWorkDuration(
     }
     if (PowerHintMonitor::getInstance()->isRunning() && isStale()) {
         if (ATRACE_ENABLED()) {
-            std::string sz = StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-stale",
-                                          mDescriptor->tgid, mDescriptor->uid,
-                                          reinterpret_cast<uintptr_t>(this) & 0xffff);
+            const std::string idstr = getIdString();
+            std::string sz = StringPrintf("adpf.%s-stale", idstr.c_str());
             ATRACE_INT(sz.c_str(), 0);
         }
         mDescriptor->integral_error = std::max(sPidIInit, mDescriptor->integral_error);
     }
     int64_t targetDurationNanos = (int64_t)mDescriptor->duration.count();
-    size_t length = actualDurations.size();
-    size_t start = sSamplingWindow == 0 || sSamplingWindow > length ? 0 : length - sSamplingWindow;
+    int64_t length = actualDurations.size();
+    int64_t p_start =
+            sPSamplingWindow == 0 || sPSamplingWindow > length ? 0 : length - sPSamplingWindow;
+    int64_t i_start =
+            sISamplingWindow == 0 || sISamplingWindow > length ? 0 : length - sISamplingWindow;
+    int64_t d_start =
+            sDSamplingWindow == 0 || sDSamplingWindow > length ? 0 : length - sDSamplingWindow;
     int64_t dt = ns_to_100us(targetDurationNanos);
     int64_t err_sum = 0;
     int64_t derivative_sum = 0;
-    for (size_t i = start; i < length; i++) {
+    for (int64_t i = std::min({p_start, i_start, d_start}); i < length; i++) {
         int64_t actualDurationNanos = actualDurations[i].durationNanos;
         if (std::abs(actualDurationNanos) > targetDurationNanos * 20) {
             ALOGW("The actual duration is way far from the target (%" PRId64 " >> %" PRId64 ")",
@@ -314,35 +297,43 @@ ndk::ScopedAStatus PowerHintSession::reportActualWorkDuration(
         // PID control algorithm
         int64_t error = ns_to_100us(actualDurationNanos - targetDurationNanos) +
                         static_cast<int64_t>(sPidOffset);
-        derivative_sum += error - mDescriptor->previous_error;
-        err_sum += error;
+        if (i >= d_start) {
+            derivative_sum += error - mDescriptor->previous_error;
+        }
+        if (i >= p_start) {
+            err_sum += error;
+        }
+        if (i >= i_start) {
+            mDescriptor->integral_error = mDescriptor->integral_error + error * dt;
+            mDescriptor->integral_error = std::min(sPidIClamp, mDescriptor->integral_error);
+            mDescriptor->integral_error = std::max(-sPidIClamp, mDescriptor->integral_error);
+        }
         mDescriptor->previous_error = error;
-        mDescriptor->integral_error = mDescriptor->integral_error + error * dt;
-        mDescriptor->integral_error = std::min(sPidIClamp, mDescriptor->integral_error);
-        mDescriptor->integral_error = std::max(-sPidIClamp, mDescriptor->integral_error);
     }
-    if (ATRACE_ENABLED()) {
-        std::string sz = StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-actl_last",
-                                      mDescriptor->tgid, mDescriptor->uid,
-                                      reinterpret_cast<uintptr_t>(this) & 0xffff);
-        ATRACE_INT(sz.c_str(), actualDurations[length - 1].durationNanos);
-        sz = StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-target", mDescriptor->tgid,
-                          mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
-        ATRACE_INT(sz.c_str(), (int64_t)mDescriptor->duration.count());
-        sz = StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-sample_size",
-                          mDescriptor->tgid, mDescriptor->uid,
-                          reinterpret_cast<uintptr_t>(this) & 0xffff);
-        ATRACE_INT(sz.c_str(), length);
-    }
-    int64_t pOut = static_cast<int64_t>(sPidP * err_sum / (length - start));
+    int64_t pOut = static_cast<int64_t>(sPidP * err_sum / (length - p_start));
     int64_t iOut = static_cast<int64_t>(sPidI * mDescriptor->integral_error);
-    int64_t dOut = static_cast<int64_t>(sPidD * derivative_sum / dt / (length - start));
+    int64_t dOut = static_cast<int64_t>(sPidD * derivative_sum / dt / (length - d_start));
 
     int64_t output = pOut + iOut + dOut;
-    TRACE_ADPF_PID(reinterpret_cast<uintptr_t>(this) & 0xffff, mDescriptor->uid, mDescriptor->tgid,
-                   mDescriptor->update_count, err_sum / (length - start),
-                   mDescriptor->integral_error, derivative_sum / dt / (length - start), pOut, iOut,
-                   dOut, static_cast<int>(output));
+    if (ATRACE_ENABLED()) {
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-actl_last", idstr.c_str());
+        ATRACE_INT(sz.c_str(), actualDurations[length - 1].durationNanos);
+        sz = StringPrintf("adpf.%s-target", idstr.c_str());
+        ATRACE_INT(sz.c_str(), (int64_t)mDescriptor->duration.count());
+        sz = StringPrintf("adpf.%s-sample_size", idstr.c_str());
+        ATRACE_INT(sz.c_str(), length);
+        sz = StringPrintf("adpf.%s-pid.count", idstr.c_str());
+        ATRACE_INT(sz.c_str(), mDescriptor->update_count);
+        sz = StringPrintf("adpf.%s-pid.pOut", idstr.c_str());
+        ATRACE_INT(sz.c_str(), pOut);
+        sz = StringPrintf("adpf.%s-pid.iOut", idstr.c_str());
+        ATRACE_INT(sz.c_str(), iOut);
+        sz = StringPrintf("adpf.%s-pid.dOut", idstr.c_str());
+        ATRACE_INT(sz.c_str(), dOut);
+        sz = StringPrintf("adpf.%s-pid.output", idstr.c_str());
+        ATRACE_INT(sz.c_str(), output);
+    }
     mDescriptor->update_count++;
 
     mStaleHandler->updateStaleTimer();
@@ -392,9 +383,8 @@ bool PowerHintSession::isStale() {
 
 void PowerHintSession::setStale() {
     if (ATRACE_ENABLED()) {
-        std::string sz =
-                StringPrintf("adpf.%" PRId32 "-%" PRId32 "-%" PRIxPTR "-stale", mDescriptor->tgid,
-                             mDescriptor->uid, reinterpret_cast<uintptr_t>(this) & 0xffff);
+        const std::string idstr = getIdString();
+        std::string sz = StringPrintf("adpf.%s-stale", idstr.c_str());
         ATRACE_INT(sz.c_str(), 1);
     }
     // Reset to default uclamp value.
