@@ -113,9 +113,10 @@ bool BatteryDefender::writeIntToFile(const std::string &path, const int value) {
 }
 
 void BatteryDefender::writeTimeToFile(const std::string &path, const int value, int64_t *previous) {
-    // 30 second delay before repeated writes
-    const bool hasTimeChangedSignificantly = ((value == 0) || (*previous == -1) ||
-                                              (value > *previous + 30) || (value < *previous - 30));
+    // Some number of seconds delay before repeated writes
+    const bool hasTimeChangedSignificantly =
+            ((value == 0) || (*previous == -1) || (value > (*previous + kWriteDelaySecs)) ||
+             (value < (*previous - kWriteDelaySecs)));
     if ((value != *previous) && hasTimeChangedSignificantly) {
         writeIntToFile(path, value);
         *previous = value;
@@ -289,6 +290,13 @@ BatteryDefender::state_E BatteryDefender::stateMachine_getNextState(const state_
             case STATE_ACTIVE: {
                 const int timeToClear = android::base::GetIntProperty(
                         kPropBatteryDefenderCtrlResumeTime, kTimeToClearTimerSecs, 0, INT32_MAX);
+
+                const int bdClear = android::base::GetIntProperty(kPropBatteryDefenderCtrlClear, 0);
+
+                if (bdClear > 0) {
+                    android::base::SetProperty(kPropBatteryDefenderCtrlClear, "0");
+                    nextState = STATE_DISCONNECTED;
+                }
 
                 /* Check for mIsPowerAvailable in case timeToClear is 0 */
                 if ((mTimeChargerNotPresentSecs >= timeToClear) && (mIsPowerAvailable == false)) {
