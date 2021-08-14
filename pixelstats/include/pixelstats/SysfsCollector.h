@@ -20,6 +20,7 @@
 #include <aidl/android/frameworks/stats/IStats.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 #include "BatteryEEPROMReporter.h"
+#include "MitigationStatsReporter.h"
 #include "MmMetricsReporter.h"
 
 namespace android {
@@ -53,6 +54,7 @@ class SysfsCollector {
         const char *const ZramMmStatPath;
         const char *const ZramBdStatPath;
         const char *const EEPROMPath;
+        const char *const MitigationPath;
     };
 
     SysfsCollector(const struct SysfsPaths &paths);
@@ -75,6 +77,7 @@ class SysfsCollector {
     void logUFSErrorStats(const std::shared_ptr<IStats> &stats_client);
     void logF2fsStats(const std::shared_ptr<IStats> &stats_client);
     void logF2fsCompressionInfo(const std::shared_ptr<IStats> &stats_client);
+    void logF2fsGcSegmentInfo(const std::shared_ptr<IStats> &stats_client);
     void logZramStats(const std::shared_ptr<IStats> &stats_client);
     void logBootStats(const std::shared_ptr<IStats> &stats_client);
     void logBatteryEEPROM(const std::shared_ptr<IStats> &stats_client);
@@ -83,6 +86,7 @@ class SysfsCollector {
                               const VendorSlowIo::IoOperation &operation_s);
     void reportZramMmStat(const std::shared_ptr<IStats> &stats_client);
     void reportZramBdStat(const std::shared_ptr<IStats> &stats_client);
+    int getReclaimedSegments(const std::string &mode);
 
     const char *const kSlowioReadCntPath;
     const char *const kSlowioWriteCntPath;
@@ -103,9 +107,11 @@ class SysfsCollector {
     const char *const kZramMmStatPath;
     const char *const kZramBdStatPath;
     const char *const kEEPROMPath;
+    const char *const kPowerMitigationStatsPath;
 
     BatteryEEPROMReporter battery_EEPROM_reporter_;
     MmMetricsReporter mm_metrics_reporter_;
+    MitigationStatsReporter mitigation_stats_reporter_;
 
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number
