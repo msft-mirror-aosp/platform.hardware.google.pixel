@@ -51,6 +51,7 @@ constexpr std::string_view kSensorTripPointHystZeroFile("trip_point_0_hyst");
 constexpr std::string_view kUserSpaceSuffix("user_space");
 constexpr std::string_view kCoolingDeviceCurStateSuffix("cur_state");
 constexpr std::string_view kCoolingDeviceMaxStateSuffix("max_state");
+constexpr std::string_view kCoolingDeviceState2powerSuffix("state2power_table");
 constexpr std::string_view kConfigProperty("vendor.thermal.config");
 constexpr std::string_view kConfigDefaultFileName("thermal_info_config.json");
 constexpr std::string_view kThermalGenlProperty("persist.vendor.enable.thermal.genl");
@@ -808,8 +809,14 @@ bool ThermalHelper::initializeSensorMap(
             LOG(ERROR) << "Could not find " << sensor_name << " in sysfs";
             return false;
         }
-        std::string path = android::base::StringPrintf(
-                "%s/%s", path_map.at(sensor_name.data()).c_str(), kSensorTempSuffix.data());
+
+        std::string path;
+        if (sensor_info_pair.second.temp_path.empty()) {
+            path = android::base::StringPrintf("%s/%s", path_map.at(sensor_name.data()).c_str(),
+                                               kSensorTempSuffix.data());
+        } else {
+            path = sensor_info_pair.second.temp_path;
+        }
 
         if (!thermal_sensors_.addThermalFile(sensor_name, path)) {
             LOG(ERROR) << "Could not add " << sensor_name << "to sensors map";
@@ -842,6 +849,26 @@ bool ThermalHelper::initializeCoolingDevices(
             continue;
         }
 
+        std::string state2power_path = android::base::StringPrintf(
+                "%s/%s", path.data(), kCoolingDeviceState2powerSuffix.data());
+        std::string state2power_str;
+        if (android::base::ReadFileToString(state2power_path, &state2power_str)) {
+            LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
+                      << " use state2power read from sysfs";
+            cooling_device_info_pair.second.state2power.clear();
+
+            std::stringstream power(state2power_str);
+            unsigned int power_number;
+            int i = 0;
+            while (power >> power_number) {
+                cooling_device_info_pair.second.state2power.push_back(
+                        static_cast<float>(power_number));
+                LOG(INFO) << "Cooling device " << cooling_device_info_pair.first << " state:" << i
+                          << " power: " << power_number;
+                i++;
+            }
+        }
+
         // Get max cooling device request state
         std::string max_state;
         std::string max_state_path = android::base::StringPrintf(
@@ -853,7 +880,17 @@ bool ThermalHelper::initializeCoolingDevices(
         } else {
             cooling_device_info_pair.second.max_state = std::stoi(android::base::Trim(max_state));
             LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
-                      << " max state: " << cooling_device_info_pair.second.max_state;
+                      << " max state: " << cooling_device_info_pair.second.max_state
+                      << " state2power number: "
+                      << cooling_device_info_pair.second.state2power.size();
+            if (cooling_device_info_pair.second.state2power.size() > 0 &&
+                cooling_device_info_pair.second.state2power.size() !=
+                        (size_t)cooling_device_info_pair.second.max_state + 1) {
+                LOG(ERROR) << "Invalid state2power number: "
+                           << cooling_device_info_pair.second.state2power.size()
+                           << ", number should be " << cooling_device_info_pair.second.max_state + 1
+                           << " (max_state + 1)";
+            }
         }
 
         // Add cooling device path for thermalHAL to request state
@@ -979,12 +1016,16 @@ bool ThermalHelper::fillTemperatures(hidl_vec<Temperature_1_0> *temperatures) co
     return current_index > 0;
 }
 
-bool ThermalHelper::fillCurrentTemperatures(bool filterType, TemperatureType_2_0 type,
+bool ThermalHelper::fillCurrentTemperatures(bool filterType, bool filterCallback,
+                                            TemperatureType_2_0 type,
                                             hidl_vec<Temperature_2_0> *temperatures) const {
     std::vector<Temperature_2_0> ret;
     for (const auto &name_info_pair : sensor_info_map_) {
         Temperature_2_0 temp;
         if (filterType && name_info_pair.second.type != type) {
+            continue;
+        }
+        if (filterCallback && !name_info_pair.second.send_cb) {
             continue;
         }
         if (readTemperature(name_info_pair.first, &temp, nullptr,
@@ -993,7 +1034,6 @@ bool ThermalHelper::fillCurrentTemperatures(bool filterType, TemperatureType_2_0
         } else {
             LOG(ERROR) << __func__
                        << ": error reading temperature for sensor: " << name_info_pair.first;
-            return false;
         }
     }
     *temperatures = ret;
