@@ -40,6 +40,7 @@ const int DEFAULT_CHARGE_LEVEL_STOP = 100;
 const int DEFAULT_CHARGE_LEVEL_DEFENDER_START = 70;
 const int DEFAULT_CHARGE_LEVEL_DEFENDER_STOP = 80;
 const int DEFAULT_CAPACITY_LEVEL = 100;
+const int WRITE_DELAY_SECS = 2 * ONE_MIN_IN_SECONDS;
 
 const char *const PATH_NOT_SUPPORTED = "";
 
@@ -97,6 +98,7 @@ class BatteryDefender {
     const char *const kPropBatteryDefenderDisable = "vendor.battery.defender.disable";
     const char *const kPropBatteryDefenderThreshold = "vendor.battery.defender.threshold";
     const char *const kPropBootmode = "ro.bootmode";
+
     const char *const kPropBatteryDefenderCtrlEnable = "vendor.battery.defender.ctrl.enable";
     const char *const kPropBatteryDefenderCtrlActivateTime =
             "vendor.battery.defender.ctrl.trigger_time";
@@ -108,6 +110,7 @@ class BatteryDefender {
             "vendor.battery.defender.ctrl.recharge_soc_stop";
     const char *const kPropBatteryDefenderCtrlTriggerSOC =
             "vendor.battery.defender.ctrl.trigger_soc";
+    const char *const kPropBatteryDefenderCtrlClear = "vendor.battery.defender.ctrl.clear";
 
     // Default thresholds
     const bool kDefaultEnable = true;
@@ -116,6 +119,7 @@ class BatteryDefender {
     const int kChargeLevelDefenderStart = DEFAULT_CHARGE_LEVEL_DEFENDER_START;
     const int kChargeLevelDefenderStop = DEFAULT_CHARGE_LEVEL_DEFENDER_STOP;
     const int kChargeHighCapacityLevel = DEFAULT_CAPACITY_LEVEL;
+    const int kWriteDelaySecs = WRITE_DELAY_SECS;
 
     // Inputs
     int64_t mTimeBetweenUpdateCalls = 0;

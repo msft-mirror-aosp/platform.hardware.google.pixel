@@ -199,6 +199,7 @@ class Vibrator : public BnVibrator {
     bool findHapticAlsaDevice(int *card, int *device);
     bool hasHapticAlsaDevice();
     bool enableHapticPcmAmp(struct pcm **haptic_pcm, bool enable, int card, int device);
+    void createPwleMaxLevelLimitMap();
 
     std::unique_ptr<HwApi> mHwApi;
     std::unique_ptr<HwCal> mHwCal;
@@ -214,8 +215,6 @@ class Vibrator : public BnVibrator {
     int mDevice;
     bool mHasHapticAlsaDevice;
     bool mIsUnderExternalControl;
-    // TODO(b/189395620)
-    bool mBypassPending = false;
 };
 
 }  // namespace vibrator
