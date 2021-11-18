@@ -21,11 +21,10 @@
 #include <android-base/parsedouble.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
-#include <log/log.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <utils/Trace.h>
-
-#include <sys/syscall.h>
+#include <atomic>
 
 #include "PowerHintSession.h"
 #include "PowerSessionManager.h"
@@ -42,17 +41,22 @@ using std::chrono::duration_cast;
 using std::chrono::nanoseconds;
 using std::literals::chrono_literals::operator""s;
 
-constexpr char kPowerHalAdpfPidOffset[] = "vendor.powerhal.adpf.pid.offset";
-constexpr char kPowerHalAdpfPidP[] = "vendor.powerhal.adpf.pid.p";
-constexpr char kPowerHalAdpfPidI[] = "vendor.powerhal.adpf.pid.i";
-constexpr char kPowerHalAdpfPidIClamp[] = "vendor.powerhal.adpf.pid.i_clamp";
-constexpr char kPowerHalAdpfPidD[] = "vendor.powerhal.adpf.pid.d";
-constexpr char kPowerHalAdpfPidInitialIntegral[] = "vendor.powerhal.adpf.pid.i_init";
+constexpr char kPowerHalAdpfPidPOver[] = "vendor.powerhal.adpf.pid_p.over";
+constexpr char kPowerHalAdpfPidPUnder[] = "vendor.powerhal.adpf.pid_p.under";
+constexpr char kPowerHalAdpfPidI[] = "vendor.powerhal.adpf.pid_i";
+constexpr char kPowerHalAdpfPidDOver[] = "vendor.powerhal.adpf.pid_d.over";
+constexpr char kPowerHalAdpfPidDUnder[] = "vendor.powerhal.adpf.pid_d.under";
+constexpr char kPowerHalAdpfPidIInit[] = "vendor.powerhal.adpf.pid_i.init";
+constexpr char kPowerHalAdpfPidIHighLimit[] = "vendor.powerhal.adpf.pid_i.high_limit";
+constexpr char kPowerHalAdpfPidILowLimit[] = "vendor.powerhal.adpf.pid_i.low_limit";
 constexpr char kPowerHalAdpfUclampEnable[] = "vendor.powerhal.adpf.uclamp";
-constexpr char kPowerHalAdpfUclampBoostCap[] = "vendor.powerhal.adpf.uclamp.boost_cap";
-constexpr char kPowerHalAdpfUclampGranularity[] = "vendor.powerhal.adpf.uclamp.granularity";
+constexpr char kPowerHalAdpfUclampMinGranularity[] = "vendor.powerhal.adpf.uclamp_min.granularity";
+constexpr char kPowerHalAdpfUclampMinHighLimit[] = "vendor.powerhal.adpf.uclamp_min.high_limit";
+constexpr char kPowerHalAdpfUclampMinLowLimit[] = "vendor.powerhal.adpf.uclamp_min.low_limit";
 constexpr char kPowerHalAdpfStaleTimeFactor[] = "vendor.powerhal.adpf.stale_timeout_factor";
-constexpr char kPowerHalAdpfSamplingWindow[] = "vendor.powerhal.adpf.sampling_window";
+constexpr char kPowerHalAdpfPSamplingWindow[] = "vendor.powerhal.adpf.p.window";
+constexpr char kPowerHalAdpfISamplingWindow[] = "vendor.powerhal.adpf.i.window";
+constexpr char kPowerHalAdpfDSamplingWindow[] = "vendor.powerhal.adpf.d.window";
 
 namespace {
 /* there is no glibc or bionic wrapper */
@@ -91,35 +95,47 @@ static double getDoubleProperty(const char *prop, double value) {
     return value;
 }
 
-static double sPidOffset = getDoubleProperty(kPowerHalAdpfPidOffset, 0.0);
-static double sPidP = getDoubleProperty(kPowerHalAdpfPidP, 2.0);
+static double sPidPOver = getDoubleProperty(kPowerHalAdpfPidPOver, 5.0);
+static double sPidPUnder = getDoubleProperty(kPowerHalAdpfPidPUnder, 3.0);
 static double sPidI = getDoubleProperty(kPowerHalAdpfPidI, 0.001);
-static double sPidD = getDoubleProperty(kPowerHalAdpfPidD, 100.0);
+static double sPidDOver = getDoubleProperty(kPowerHalAdpfPidDOver, 500.0);
+static double sPidDUnder = getDoubleProperty(kPowerHalAdpfPidDUnder, 0.0);
 static const int64_t sPidIInit =
         (sPidI == 0) ? 0
                      : static_cast<int64_t>(::android::base::GetIntProperty<int64_t>(
-                                                    kPowerHalAdpfPidInitialIntegral, 100) /
+                                                    kPowerHalAdpfPidIInit, 200) /
                                             sPidI);
-static const int64_t sPidIClamp =
+static const int64_t sPidIHighLimit =
         (sPidI == 0) ? 0
-                     : std::abs(static_cast<int64_t>(::android::base::GetIntProperty<int64_t>(
-                                                             kPowerHalAdpfPidIClamp, 512) /
-                                                     sPidI));
-static const int sUclampCap =
-        ::android::base::GetIntProperty<int>(kPowerHalAdpfUclampBoostCap, 512);
-static const uint32_t sUclampGranularity =
-        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampGranularity, 5);
+                     : static_cast<int64_t>(::android::base::GetIntProperty<int64_t>(
+                                                    kPowerHalAdpfPidIHighLimit, 512) /
+                                            sPidI);
+static const int64_t sPidILowLimit =
+        (sPidI == 0) ? 0
+                     : static_cast<int64_t>(::android::base::GetIntProperty<int64_t>(
+                                                    kPowerHalAdpfPidILowLimit, -120) /
+                                            sPidI);
+static const int32_t sUclampMinHighLimit =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampMinHighLimit, 512);
+static const int32_t sUclampMinLowLimit =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampMinLowLimit, 0);
+static const uint32_t sUclampMinGranularity =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfUclampMinGranularity, 5);
 static const int64_t sStaleTimeFactor =
-        ::android::base::GetIntProperty<int64_t>(kPowerHalAdpfStaleTimeFactor, 20);
-static const size_t sSamplingWindow =
-        ::android::base::GetUintProperty<size_t>(kPowerHalAdpfSamplingWindow, 0);
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfStaleTimeFactor, 20);
+static const int64_t sPSamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfPSamplingWindow, 1);
+static const int64_t sISamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfISamplingWindow, 0);
+static const int64_t sDSamplingWindow =
+        ::android::base::GetUintProperty<uint32_t>(kPowerHalAdpfDSamplingWindow, 1);
 
 }  // namespace
 
 PowerHintSession::PowerHintSession(int32_t tgid, int32_t uid, const std::vector<int32_t> &threadIds,
                                    int64_t durationNanos, const nanoseconds adpfRate)
     : kAdpfRate(adpfRate) {
-    mDescriptor = new AppHintDesc(tgid, uid, threadIds, sUclampCap);
+    mDescriptor = new AppHintDesc(tgid, uid, threadIds);
     mDescriptor->duration = std::chrono::nanoseconds(durationNanos);
     mStaleHandler = sp<StaleHandler>(new StaleHandler(this));
     mPowerManagerHandler = PowerSessionManager::getInstance();
@@ -132,6 +148,8 @@ PowerHintSession::PowerHintSession(int32_t tgid, int32_t uid, const std::vector<
         ATRACE_INT(sz.c_str(), mDescriptor->is_active.load());
     }
     PowerSessionManager::getInstance()->addPowerSession(this);
+    // init boost
+    setUclamp(sUclampMinHighLimit);
     ALOGV("PowerHintSession created: %s", mDescriptor->toString().c_str());
 }
 
@@ -185,6 +203,7 @@ int PowerHintSession::setUclamp(int32_t min, int32_t max) {
         }
         ALOGV("PowerHintSession tid: %d, uclamp(%d, %d)", tid, min, max);
     }
+    mDescriptor->current_min = min;
     return 0;
 }
 
@@ -192,7 +211,7 @@ ndk::ScopedAStatus PowerHintSession::pause() {
     if (!mDescriptor->is_active.load())
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     // Reset to default uclamp value.
-    setUclamp(0, 1024);
+    setUclamp(0);
     mDescriptor->is_active.store(false);
     if (ATRACE_ENABLED()) {
         const std::string idstr = getIdString();
@@ -208,6 +227,8 @@ ndk::ScopedAStatus PowerHintSession::resume() {
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     mDescriptor->is_active.store(true);
     mDescriptor->integral_error = std::max(sPidIInit, mDescriptor->integral_error);
+    // resume boost
+    setUclamp(sUclampMinHighLimit);
     if (ATRACE_ENABLED()) {
         const std::string idstr = getIdString();
         std::string sz = StringPrintf("adpf.%s-active", idstr.c_str());
@@ -218,9 +239,12 @@ ndk::ScopedAStatus PowerHintSession::resume() {
 }
 
 ndk::ScopedAStatus PowerHintSession::close() {
+    bool sessionClosedExpectedToBe = false;
+    if (!mSessionClosed.compare_exchange_strong(sessionClosedExpectedToBe, true)) {
+        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+    }
     PowerHintMonitor::getInstance()->getLooper()->removeMessages(mStaleHandler);
-    // Reset to (0, 1024) uclamp value -- instead of threads' original setting.
-    setUclamp(0, 1024);
+    setUclamp(0);
     PowerSessionManager::getInstance()->removePowerSession(this);
     updateUniveralBoostMode();
     return ndk::ScopedAStatus::ok();
@@ -270,30 +294,42 @@ ndk::ScopedAStatus PowerHintSession::reportActualWorkDuration(
         mDescriptor->integral_error = std::max(sPidIInit, mDescriptor->integral_error);
     }
     int64_t targetDurationNanos = (int64_t)mDescriptor->duration.count();
-    size_t length = actualDurations.size();
-    size_t start = sSamplingWindow == 0 || sSamplingWindow > length ? 0 : length - sSamplingWindow;
+    int64_t length = actualDurations.size();
+    int64_t p_start =
+            sPSamplingWindow == 0 || sPSamplingWindow > length ? 0 : length - sPSamplingWindow;
+    int64_t i_start =
+            sISamplingWindow == 0 || sISamplingWindow > length ? 0 : length - sISamplingWindow;
+    int64_t d_start =
+            sDSamplingWindow == 0 || sDSamplingWindow > length ? 0 : length - sDSamplingWindow;
     int64_t dt = ns_to_100us(targetDurationNanos);
     int64_t err_sum = 0;
     int64_t derivative_sum = 0;
-    for (size_t i = start; i < length; i++) {
+    for (int64_t i = std::min({p_start, i_start, d_start}); i < length; i++) {
         int64_t actualDurationNanos = actualDurations[i].durationNanos;
         if (std::abs(actualDurationNanos) > targetDurationNanos * 20) {
             ALOGW("The actual duration is way far from the target (%" PRId64 " >> %" PRId64 ")",
                   actualDurationNanos, targetDurationNanos);
         }
         // PID control algorithm
-        int64_t error = ns_to_100us(actualDurationNanos - targetDurationNanos) +
-                        static_cast<int64_t>(sPidOffset);
-        derivative_sum += error - mDescriptor->previous_error;
-        err_sum += error;
+        int64_t error = ns_to_100us(actualDurationNanos - targetDurationNanos);
+        if (i >= d_start) {
+            derivative_sum += error - mDescriptor->previous_error;
+        }
+        if (i >= p_start) {
+            err_sum += error;
+        }
+        if (i >= i_start) {
+            mDescriptor->integral_error = mDescriptor->integral_error + error * dt;
+            mDescriptor->integral_error = std::min(sPidIHighLimit, mDescriptor->integral_error);
+            mDescriptor->integral_error = std::max(sPidILowLimit, mDescriptor->integral_error);
+        }
         mDescriptor->previous_error = error;
-        mDescriptor->integral_error = mDescriptor->integral_error + error * dt;
-        mDescriptor->integral_error = std::min(sPidIClamp, mDescriptor->integral_error);
-        mDescriptor->integral_error = std::max(-sPidIClamp, mDescriptor->integral_error);
     }
-    int64_t pOut = static_cast<int64_t>(sPidP * err_sum / (length - start));
+    int64_t pOut = static_cast<int64_t>((err_sum > 0 ? sPidPOver : sPidPUnder) * err_sum /
+                                        (length - p_start));
     int64_t iOut = static_cast<int64_t>(sPidI * mDescriptor->integral_error);
-    int64_t dOut = static_cast<int64_t>(sPidD * derivative_sum / dt / (length - start));
+    int64_t dOut = static_cast<int64_t>((derivative_sum > 0 ? sPidDOver : sPidDUnder) *
+                                        derivative_sum / dt / (length - d_start));
 
     int64_t output = pOut + iOut + dOut;
     if (ATRACE_ENABLED()) {
@@ -321,11 +357,11 @@ ndk::ScopedAStatus PowerHintSession::reportActualWorkDuration(
 
     /* apply to all the threads in the group */
     if (output != 0) {
-        int next_min = std::min(sUclampCap, mDescriptor->current_min + static_cast<int>(output));
-        next_min = std::max(0, next_min);
-        if (std::abs(mDescriptor->current_min - next_min) > sUclampGranularity) {
-            setUclamp(next_min, 1024);
-            mDescriptor->current_min = next_min;
+        int next_min =
+                std::min(sUclampMinHighLimit, mDescriptor->current_min + static_cast<int>(output));
+        next_min = std::max(sUclampMinLowLimit, next_min);
+        if (std::abs(mDescriptor->current_min - next_min) > sUclampMinGranularity) {
+            setUclamp(next_min);
         }
     }
 
@@ -362,6 +398,10 @@ bool PowerHintSession::isStale() {
     return now >= mStaleHandler->getStaleTime();
 }
 
+const std::vector<int> &PowerHintSession::getTidList() const {
+    return mDescriptor->threadIds;
+}
+
 void PowerHintSession::setStale() {
     if (ATRACE_ENABLED()) {
         const std::string idstr = getIdString();
@@ -369,7 +409,7 @@ void PowerHintSession::setStale() {
         ATRACE_INT(sz.c_str(), 1);
     }
     // Reset to default uclamp value.
-    setUclamp(0, 1024);
+    setUclamp(0);
     // Deliver a task to check if all sessions are inactive.
     updateUniveralBoostMode();
 }
