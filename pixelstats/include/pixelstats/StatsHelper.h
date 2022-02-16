@@ -50,9 +50,6 @@ void reportPhysicalDropDetected(const std::shared_ptr<IStats> &stats_client,
 void reportUsbPortOverheat(const std::shared_ptr<IStats> &stats_client,
                            const PixelAtoms::VendorUsbPortOverheat &overheat_info);
 
-void reportSpeakerHealthStat(const std::shared_ptr<IStats> &stats_client,
-                             const PixelAtoms::VendorSpeakerStatsReported &speakerHealthStat);
-
 }  // namespace pixel
 }  // namespace google
 }  // namespace hardware
