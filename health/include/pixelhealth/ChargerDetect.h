@@ -15,9 +15,7 @@
  */
 
 #ifndef HARDWARE_GOOGLE_PIXEL_HEALTH_CHARGER_DETECT_H
-#define HARDWARE_GOOGLE_PIXEL_HEALTH_CHARGER_DETECT_H
 
-#include <aidl/android/hardware/health/HealthInfo.h>
 #include <android-base/strings.h>
 #include <healthd/BatteryMonitor.h>
 
@@ -29,16 +27,13 @@ namespace pixel {
 namespace health {
 
 class ChargerDetect {
-  public:
-    // Deprecated. Use onlineUpdate(HealthInfo*)
-    static void onlineUpdate(struct android::BatteryProperties *props);
-    static void onlineUpdate(aidl::android::hardware::health::HealthInfo *health_info);
-    static void populateTcpmPsyName(std::string *tcpmPsyName);
-
-  private:
-    static int getPsyUsbType(const std::string &path, std::string *type);
-    static int readFromFile(const std::string &path, std::string *buf);
-    static int getIntField(const std::string &path);
+    public:
+        static void onlineUpdate(struct android::BatteryProperties *props);
+	static void populateTcpmPsyName(std::string* tcpmPsyName);
+    private:
+	static int getPsyUsbType(const std::string& path, std::string* type);
+	static int readFromFile(const std::string& path, std::string* buf);
+	static int getIntField(const std::string& path);
 };
 
 }  // namespace health
