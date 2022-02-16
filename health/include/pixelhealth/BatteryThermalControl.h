@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <aidl/android/hardware/health/HealthInfo.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
@@ -39,9 +38,7 @@ namespace health {
 class BatteryThermalControl {
   public:
     BatteryThermalControl(const std::string &path);
-    // Deprecated. Use updateThermalState(const HealthInfo&)
     void updateThermalState(const struct android::BatteryProperties *props);
-    void updateThermalState(const aidl::android::hardware::health::HealthInfo &health_info);
 
   private:
     void setThermalMode(bool isEnable, bool isWeakCharger);
