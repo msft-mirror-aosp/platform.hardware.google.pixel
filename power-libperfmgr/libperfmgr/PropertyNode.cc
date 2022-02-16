@@ -73,12 +73,8 @@ std::chrono::milliseconds PropertyNode::Update(bool) {
 void PropertyNode::DumpToFd(int fd) const {
     std::string node_value = android::base::GetProperty(node_path_, "");
     std::string buf(android::base::StringPrintf(
-            "Node Name\t"
-            "Property Name\t"
-            "Current Index\t"
-            "Current Value\n"
-            "%s\t%s\t%zu\t%s\n",
-            name_.c_str(), node_path_.c_str(), current_val_index_, node_value.c_str()));
+        "%s\t%s\t%zu\t%s\n", name_.c_str(), node_path_.c_str(),
+        current_val_index_, node_value.c_str()));
     if (!android::base::WriteStringToFd(buf, fd)) {
         LOG(ERROR) << "Failed to dump fd: " << fd;
     }

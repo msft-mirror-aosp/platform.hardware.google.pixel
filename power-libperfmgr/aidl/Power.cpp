@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 #define LOG_TAG "powerhal-libperfmgr"
 
 #include "Power.h"
@@ -25,8 +26,10 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <cutils/properties.h>
 
 #include <utils/Log.h>
+#include <utils/Trace.h>
 
 #include "PowerHintSession.h"
 #include "PowerSessionManager.h"
@@ -47,11 +50,9 @@ constexpr char kPowerHalRenderingProp[] = "vendor.powerhal.rendering";
 constexpr char kPowerHalAdpfRateProp[] = "vendor.powerhal.adpf.rate";
 constexpr int64_t kPowerHalAdpfRateDefault = -1;
 
-Power::Power(std::shared_ptr<HintManager> hm, std::shared_ptr<DisplayLowPower> dlpw,
-             std::shared_ptr<AdaptiveCpu> adaptiveCpu)
+Power::Power(std::shared_ptr<HintManager> hm, std::shared_ptr<DisplayLowPower> dlpw)
     : mHintManager(hm),
       mDisplayLowPower(dlpw),
-      mAdaptiveCpu(adaptiveCpu),
       mInteractionHandler(nullptr),
       mVRModeOn(false),
       mSustainedPerfModeOn(false),
@@ -96,6 +97,7 @@ Power::Power(std::shared_ptr<HintManager> hm, std::shared_ptr<DisplayLowPower> d
 
 ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
     LOG(DEBUG) << "Power setMode: " << toString(type) << " to: " << enabled;
+    ATRACE_INT(toString(type).c_str(), enabled);
     PowerSessionManager::getInstance()->updateHintMode(toString(type), enabled);
     switch (type) {
         case Mode::LOW_POWER:
@@ -169,8 +171,6 @@ ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
             [[fallthrough]];
         case Mode::CAMERA_STREAMING_HIGH:
             [[fallthrough]];
-        case Mode::GAME_LOADING:
-            [[fallthrough]];
         default:
             if (enabled) {
                 mHintManager->DoHint(toString(type));
@@ -196,6 +196,7 @@ ndk::ScopedAStatus Power::isModeSupported(Mode type, bool *_aidl_return) {
 
 ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
     LOG(DEBUG) << "Power setBoost: " << toString(type) << " duration: " << durationMs;
+    ATRACE_INT(toString(type).c_str(), durationMs);
     switch (type) {
         case Boost::INTERACTION:
             if (mVRModeOn || mSustainedPerfModeOn) {
@@ -250,7 +251,6 @@ binder_status_t Power::dump(int fd, const char **, uint32_t) {
             boolToString(mSustainedPerfModeOn)));
     // Dump nodes through libperfmgr
     mHintManager->DumpToFd(fd);
-    mAdaptiveCpu->DumpToFd(fd);
     if (!::android::base::WriteStringToFd(buf, fd)) {
         PLOG(ERROR) << "Failed to dump state to fd";
     }
@@ -272,7 +272,7 @@ ndk::ScopedAStatus Power::createHintSession(int32_t tgid, int32_t uid,
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
     }
     std::shared_ptr<IPowerHintSession> session = ndk::SharedRefBase::make<PowerHintSession>(
-            mAdaptiveCpu, tgid, uid, threadIds, durationNanos, nanoseconds(mAdpfRateNs));
+            tgid, uid, threadIds, durationNanos, nanoseconds(mAdpfRateNs));
     *_aidl_return = session;
     return ndk::ScopedAStatus::ok();
 }
