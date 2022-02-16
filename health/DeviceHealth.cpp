@@ -16,9 +16,10 @@
 
 #define LOG_TAG "dhealth"
 
+#include <pixelhealth/DeviceHealth.h>
+
 #include <android-base/properties.h>
 #include <cutils/klog.h>
-#include <pixelhealth/DeviceHealth.h>
 
 namespace hardware {
 namespace google {
@@ -29,21 +30,11 @@ DeviceHealth::DeviceHealth() {
     is_user_build_ = android::base::GetProperty("ro.build.type", "") == "user";
 }
 
-bool DeviceHealth::shouldFakeBatteryTemperature() const {
-    return !is_user_build_ &&
-           (android::base::GetProperty("persist.vendor.disable.thermal.control", "") == "1" ||
-            android::base::GetProperty("persist.vendor.fake.battery.temperature", "") == "1");
-}
-
 void DeviceHealth::update(struct android::BatteryProperties *props) {
-    if (shouldFakeBatteryTemperature()) {
+    if (!is_user_build_ &&
+        (android::base::GetProperty("persist.vendor.disable.thermal.control", "") == "1" ||
+         android::base::GetProperty("persist.vendor.fake.battery.temperature", "") == "1")) {
         props->batteryTemperature = 200;
-    }
-}
-
-void DeviceHealth::update(aidl::android::hardware::health::HealthInfo *health_info) {
-    if (shouldFakeBatteryTemperature()) {
-        health_info->batteryTemperatureTenthsCelsius = 200;
     }
 }
 
