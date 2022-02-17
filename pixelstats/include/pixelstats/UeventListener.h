@@ -20,8 +20,8 @@
 #include <aidl/android/frameworks/stats/IStats.h>
 #include <android-base/chrono_utils.h>
 #include <pixelstats/BatteryCapacityReporter.h>
+#include <pixelstats/ChargeStatsReporter.h>
 #include <pixelstats/PcaChargeStats.h>
-#include <pixelstats/WirelessChargeStats.h>
 #include <pixelstats/WlcReporter.h>
 
 namespace android {
@@ -48,6 +48,7 @@ class UeventListener {
         const char *const SsocDetailsPath;
         const char *const OverheatPath;
         const char *const ChargeMetricsPath;
+        const char *const TypeCPartnerUevent;
         const char *const TypeCPartnerVidPath;
         const char *const TypeCPartnerPidPath;
         const char *const WirelessChargerPtmcUevent;
@@ -63,6 +64,7 @@ class UeventListener {
             "/sys/class/typec/port0-partner/identity/id_header";
     constexpr static const char *const typec_partner_pid_path_default =
             "/sys/class/typec/port0-partner/identity/product";
+    constexpr static const char *const typec_partner_uevent_default = "DEVTYPE=typec_partner";
 
     UeventListener(const std::string audio_uevent, const std::string ssoc_details_path = "",
                    const std::string overheat_path = overheat_path_default,
@@ -99,12 +101,14 @@ class UeventListener {
     const std::string kBatterySSOCPath;
     const std::string kUsbPortOverheatPath;
     const std::string kChargeMetricsPath;
+    const std::string kTypeCPartnerUevent;
     const std::string kTypeCPartnerVidPath;
     const std::string kTypeCPartnerPidPath;
     const std::string kWirelessChargerPtmcUevent;
     const std::string kWirelessChargerPtmcPath;
 
     BatteryCapacityReporter battery_capacity_reporter_;
+    ChargeStatsReporter charge_stats_reporter_;
 
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number
@@ -113,9 +117,6 @@ class UeventListener {
 
     int uevent_fd_;
     int log_fd_;
-
-    PcaChargeStats pca_charge_stats_;
-    WirelessChargeStats wireless_charge_stats_;
 
     WlcReporter wlc_reporter_ = WlcReporter(kWirelessChargerPtmcPath.c_str());
 };
