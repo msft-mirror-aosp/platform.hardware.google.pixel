@@ -26,6 +26,7 @@
 
 #include "AdaptiveCpuConfig.h"
 #include "AdaptiveCpuStats.h"
+#include "Device.h"
 #include "KernelCpuFeatureReader.h"
 #include "Model.h"
 #include "WorkDurationProcessor.h"
@@ -67,9 +68,6 @@ class AdaptiveCpu {
     static constexpr char HINT_NAME[] = "ADAPTIVE_CPU";
 
   private:
-    static const std::unordered_map<ThrottleDecision, std::vector<std::string>>
-            kThrottleDecisionToHintNames;
-
     void StartThread();
 
     void SuspendThread();
@@ -103,6 +101,7 @@ class AdaptiveCpu {
     bool mIsInitialized = false;
     volatile bool mShouldReloadConfig = false;
     std::chrono::nanoseconds mLastEnabledHintTime;
+    Device mDevice;
     AdaptiveCpuConfig mConfig = AdaptiveCpuConfig::DEFAULT;
 };
 
