@@ -22,15 +22,12 @@
 #include <cutils/klog.h>
 #include <dirent.h>
 #include <pixelhealth/ChargerDetect.h>
-#include <pixelhealth/HealthHelper.h>
-
 #include <string>
 
 constexpr char kPowerSupplySysfsPath[]{"/sys/class/power_supply/"};
 constexpr char kUsbOnlinePath[]{"/sys/class/power_supply/usb/online"};
 constexpr char kUsbPowerSupplySysfsPath[]{"/sys/class/power_supply/usb/usb_type"};
 constexpr char kTcpmPsyFilter[]{"tcpm"};
-using aidl::android::hardware::health::HealthInfo;
 using android::BatteryMonitor;
 
 namespace hardware {
@@ -70,10 +67,10 @@ void ChargerDetect::populateTcpmPsyName(std::string* tcpmPsyName) {
         while ((entry = readdir(dir.get()))) {
             const char* name = entry->d_name;
 
-            KLOG_INFO(LOG_TAG, "Psy name:%s", name);
+	    KLOG_INFO(LOG_TAG, "Psy name:%s", name);
             if (strstr(name, kTcpmPsyFilter)) {
                 *tcpmPsyName = name;
-            }
+	    }
         }
     }
 }
@@ -109,13 +106,13 @@ int ChargerDetect::getPsyUsbType(const std::string& path, std::string* type) {
  * Reads the usb power_supply's usb_type and the tcpm power_supply's usb_type to infer
  * HealthInfo(hardware/interfaces/health/1.0/types.hal) online property.
  */
-void ChargerDetect::onlineUpdate(HealthInfo *health_info) {
+void ChargerDetect::onlineUpdate(struct android::BatteryProperties *props) {
     std::string tcpmOnlinePath, usbPsyType;
     static std::string tcpmPsyName;
     int ret;
 
-    health_info->chargerAcOnline = false;
-    health_info->chargerUsbOnline = false;
+    props->chargerAcOnline = false;
+    props->chargerUsbOnline = false;
 
     if (tcpmPsyName.empty()) {
         populateTcpmPsyName(&tcpmPsyName);
@@ -129,23 +126,23 @@ void ChargerDetect::onlineUpdate(HealthInfo *health_info) {
     ret = getPsyUsbType(kUsbPowerSupplySysfsPath, &usbPsyType);
     if (!ret) {
         if (usbPsyType == "CDP" || usbPsyType == "DCP") {
-            health_info->chargerAcOnline = true;
+            props->chargerAcOnline = true;
             return;
         } else if (usbPsyType == "SDP") {
-            health_info->chargerUsbOnline = true;
+            props->chargerUsbOnline = true;
             return;
-        }
+	}
     }
 
     /* Safe to assume AC charger here if BC1.2 non compliant */
-    health_info->chargerAcOnline = true;
+    props->chargerAcOnline = true;
 
     if (tcpmPsyName.empty()) {
         return;
     }
 
-    ret = getPsyUsbType(std::string(kPowerSupplySysfsPath) + tcpmPsyName + "/usb_type",
-                        &usbPsyType);
+    ret = getPsyUsbType(std::string(kPowerSupplySysfsPath) + tcpmPsyName + "/usb_type" ,
+			&usbPsyType);
     if (ret < 0) {
         return;
     }
@@ -153,15 +150,6 @@ void ChargerDetect::onlineUpdate(HealthInfo *health_info) {
     KLOG_INFO(LOG_TAG, "TcpmPsy Usbtype:%s\n", usbPsyType.c_str());
 
     return;
-}
-
-void ChargerDetect::onlineUpdate(struct android::BatteryProperties *props) {
-    HealthInfo health_info = ToHealthInfo(props);
-    onlineUpdate(&health_info);
-    // Propagate the changes to props
-    props->chargerAcOnline = health_info.chargerAcOnline;
-    props->chargerUsbOnline = health_info.chargerUsbOnline;
-    // onlineUpdate doesn't change chargerWirelessOnline and other fields.
 }
 
 }  // namespace health
