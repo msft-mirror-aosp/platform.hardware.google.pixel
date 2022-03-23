@@ -16,11 +16,7 @@
  */
 
 #include <pixelhealth/BatteryMetricsLogger.h>
-#include <pixelhealth/HealthHelper.h>
 #include <pixelhealth/StatsHelper.h>
-
-using aidl::android::hardware::health::BatteryStatus;
-using aidl::android::hardware::health::HealthInfo;
 
 namespace hardware {
 namespace google {
@@ -157,7 +153,7 @@ bool BatteryMetricsLogger::uploadMetrics(void) {
     return true;
 }
 
-bool BatteryMetricsLogger::recordSample(const HealthInfo &health_info) {
+bool BatteryMetricsLogger::recordSample(struct android::BatteryProperties *props) {
     std::string resistance_str, ocv_str;
     int32_t resistance, ocv;
     int32_t time = getTime();
@@ -182,19 +178,19 @@ bool BatteryMetricsLogger::recordSample(const HealthInfo &health_info) {
 
     int32_t sample[NUM_FIELDS] = {[TIME] = time,
                                   [RES] = resistance,
-                                  [CURR] = health_info.batteryCurrentMicroamps,
-                                  [VOLT] = health_info.batteryVoltageMillivolts,
-                                  [TEMP] = health_info.batteryTemperatureTenthsCelsius,
-                                  [SOC] = health_info.batteryLevel,
+                                  [CURR] = props->batteryCurrent,
+                                  [VOLT] = props->batteryVoltage,
+                                  [TEMP] = props->batteryTemperature,
+                                  [SOC] = props->batteryLevel,
                                   [OCV] = ocv};
-    if (health_info.batteryStatus != BatteryStatus::CHARGING) {
+    if (props->batteryStatus != android::BATTERY_STATUS_CHARGING) {
         num_res_samples_++;
     }
 
     // Only calculate the min and max for metric types we want to upload
     for (int metric = 0; metric < NUM_FIELDS; metric++) {
         // Discard resistance min/max when charging
-        if ((metric == RES && health_info.batteryStatus == BatteryStatus::CHARGING) ||
+        if ((metric == RES && props->batteryStatus == android::BATTERY_STATUS_CHARGING) ||
             kStatsSnapshotType[metric] < 0)
             continue;
         if (num_samples_ == 0 || (metric == RES && num_res_samples_ == 0) ||
@@ -216,17 +212,14 @@ bool BatteryMetricsLogger::recordSample(const HealthInfo &health_info) {
     return true;
 }
 
-void BatteryMetricsLogger::logBatteryProperties(const HealthInfo &health_info) {
+void BatteryMetricsLogger::logBatteryProperties(struct android::BatteryProperties *props) {
     int32_t time = getTime();
     if (last_sample_ == 0 || time - last_sample_ >= kSamplePeriod)
-        recordSample(health_info);
+        recordSample(props);
     if (last_sample_ - last_upload_ > kUploadPeriod || num_samples_ >= kMaxSamples)
         uploadMetrics();
 
     return;
-}
-void BatteryMetricsLogger::logBatteryProperties(struct android::BatteryProperties *props) {
-    logBatteryProperties(ToHealthInfo(props));
 }
 
 }  // namespace health
