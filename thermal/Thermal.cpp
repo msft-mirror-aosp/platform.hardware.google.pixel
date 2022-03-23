@@ -263,10 +263,13 @@ void Thermal::sendThermalChangedCallback(const Temperature_2_0 &t) {
                            [&](const CallbackSetting &c) {
                                if (!c.is_filter_type || t.type == c.type) {
                                    Return<void> ret = c.callback->notifyThrottling(t);
-                                   return !ret.isOk();
+                                   if (!ret.isOk()) {
+                                       LOG(ERROR) << "a Thermal callback is dead, removed from "
+                                                     "callback list.";
+                                       return true;
+                                   }
+                                   return false;
                                }
-                               LOG(ERROR)
-                                   << "a Thermal callback is dead, removed from callback list.";
                                return false;
                            }),
             callbacks_.end());
@@ -592,6 +595,15 @@ Return<void> Thermal::debug(const hidl_handle &handle, const hidl_vec<hidl_strin
                              << " Name: " << t.name << " CurrentValue: " << t.value
                              << " ThrottlingStatus: "
                              << android::hardware::thermal::V2_0::toString(t.throttlingStatus)
+                             << std::endl;
+                }
+            }
+            {
+                dump_buf << "getCachedTemperatures:" << std::endl;
+                const auto &sensor_status_map = thermal_helper_.GetSensorStatusMap();
+                for (const auto &sensor_status_pair : sensor_status_map) {
+                    dump_buf << " Name: " << sensor_status_pair.first
+                             << " CachedValue: " << sensor_status_pair.second.thermal_cached.temp
                              << std::endl;
                 }
             }
