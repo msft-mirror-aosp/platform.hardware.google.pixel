@@ -73,7 +73,7 @@ class HwApiBase {
     template <typename T>
     bool set(const T &value, std::ostream *stream);
     template <typename T>
-    bool poll(const T &value, std::istream *stream, const int32_t timeout = -1);
+    bool poll(const T &value, std::istream *stream);
     template <typename T>
     void record(const char *func, const T &value, const std::ios *stream);
 
@@ -124,7 +124,7 @@ bool HwApiBase::set(const T &value, std::ostream *stream) {
 }
 
 template <typename T>
-bool HwApiBase::poll(const T &value, std::istream *stream, const int32_t timeoutMs) {
+bool HwApiBase::poll(const T &value, std::istream *stream) {
     ATRACE_NAME("HwApi::poll");
     auto path = mPathPrefix + mNames[stream];
     unique_fd fileFd{::open(path.c_str(), O_RDONLY)};
@@ -134,12 +134,6 @@ bool HwApiBase::poll(const T &value, std::istream *stream, const int32_t timeout
     };
     T actual;
     bool ret;
-    int epollRet;
-
-    if (timeoutMs < -1) {
-        ALOGE("Invalid polling timeout!");
-        return false;
-    }
 
     if (epoll_ctl(epollFd, EPOLL_CTL_ADD, fileFd, &event)) {
         ALOGE("Failed to poll %s (%d): %s", mNames[stream].c_str(), errno, strerror(errno));
@@ -147,11 +141,7 @@ bool HwApiBase::poll(const T &value, std::istream *stream, const int32_t timeout
     }
 
     while ((ret = get(&actual, stream)) && (actual != value)) {
-        epollRet = epoll_wait(epollFd, &event, 1, timeoutMs);
-        if (epollRet <= 0) {
-            ALOGE("Polling error or timeout! (%d)", epollRet);
-            return false;
-        }
+        epoll_wait(epollFd, &event, 1, -1);
     }
 
     HWAPI_RECORD(value, stream);

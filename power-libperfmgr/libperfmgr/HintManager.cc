@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
-#define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 #define LOG_TAG "libperfmgr"
 
 #include "perfmgr/HintManager.h"
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
-#include <android-base/properties.h>
 #include <android-base/stringprintf.h>
-#include <inttypes.h>
 #include <json/reader.h>
 #include <json/value.h>
-#include <utils/Trace.h>
 
+#include <inttypes.h>
 #include <algorithm>
 #include <set>
 
@@ -42,8 +39,6 @@ constexpr std::chrono::milliseconds kMilliSecondZero = std::chrono::milliseconds
 constexpr std::chrono::steady_clock::time_point kTimePointMax =
         std::chrono::steady_clock::time_point::max();
 }  // namespace
-
-constexpr char kPowerHalTruncateProp[] = "vendor.powerhal.truncate";
 
 bool HintManager::ValidateHint(const std::string& hint_type) const {
     if (nm_.get() == nullptr) {
@@ -62,8 +57,7 @@ bool HintManager::IsHintSupported(const std::string& hint_type) const {
 }
 
 bool HintManager::IsHintEnabled(const std::string &hint_type) const {
-    std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
-    return actions_.at(hint_type).mask_requesters.empty();
+    return actions_.at(hint_type).enabled;
 }
 
 bool HintManager::InitHintStatus(const std::unique_ptr<HintManager> &hm) {
@@ -89,11 +83,9 @@ bool HintManager::InitHintStatus(const std::unique_ptr<HintManager> &hm) {
 }
 
 void HintManager::DoHintStatus(const std::string &hint_type, std::chrono::milliseconds timeout_ms) {
-    std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
+    std::lock_guard<std::mutex> lock(actions_.at(hint_type).status->mutex);
     actions_.at(hint_type).status->stats.count.fetch_add(1);
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), (timeout_ms == kMilliSecondZero) ? std::numeric_limits<int>::max()
-                                                                   : timeout_ms.count());
     if (now > actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -107,10 +99,9 @@ void HintManager::DoHintStatus(const std::string &hint_type, std::chrono::millis
 }
 
 void HintManager::EndHintStatus(const std::string &hint_type) {
-    std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
+    std::lock_guard<std::mutex> lock(actions_.at(hint_type).status->mutex);
     // Update HintStats if the hint ends earlier than expected end_time
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), 0);
     if (now < actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -124,6 +115,7 @@ void HintManager::DoHintAction(const std::string &hint_type) {
     for (auto &action : actions_.at(hint_type).hint_actions) {
         switch (action.type) {
             case HintActionType::DoHint:
+                // TODO: add parse logic to prevent circular hints.
                 DoHint(action.value);
                 break;
             case HintActionType::EndHint:
@@ -133,8 +125,7 @@ void HintManager::DoHintAction(const std::string &hint_type) {
                 if (actions_.find(action.value) == actions_.end()) {
                     LOG(ERROR) << "Failed to find " << action.value << " action";
                 } else {
-                    std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
-                    actions_.at(action.value).mask_requesters.insert(hint_type);
+                    actions_.at(action.value).enabled = false;
                 }
                 break;
             default:
@@ -150,8 +141,7 @@ void HintManager::EndHintAction(const std::string &hint_type) {
     for (auto &action : actions_.at(hint_type).hint_actions) {
         if (action.type == HintActionType::MaskHint &&
             actions_.find(action.value) != actions_.end()) {
-            std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
-            actions_.at(action.value).mask_requesters.erase(hint_type);
+            actions_.at(action.value).enabled = true;
         }
     }
 }
@@ -211,7 +201,6 @@ std::vector<std::string> HintManager::GetHints() const {
 HintStats HintManager::GetHintStats(const std::string &hint_type) const {
     HintStats hint_stats;
     if (ValidateHint(hint_type)) {
-        std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
         hint_stats.count =
                 actions_.at(hint_type).status->stats.count.load(std::memory_order_relaxed);
         hint_stats.duration_ms =
@@ -221,7 +210,12 @@ HintStats HintManager::GetHintStats(const std::string &hint_type) const {
 }
 
 void HintManager::DumpToFd(int fd) {
-    std::string header("========== Begin perfmgr nodes ==========\n");
+    std::string header(
+        "========== Begin perfmgr nodes ==========\n"
+        "Node Name\t"
+        "Node Path\t"
+        "Current Index\t"
+        "Current Value\n");
     if (!android::base::WriteStringToFd(header, fd)) {
         LOG(ERROR) << "Failed to dump fd: " << fd;
     }
@@ -423,15 +417,6 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
                      << reset << std::noboolalpha;
 
         if (is_file) {
-            bool truncate = android::base::GetBoolProperty(kPowerHalTruncateProp, true);
-            if (nodes[i]["Truncate"].empty() || !nodes[i]["Truncate"].isBool()) {
-                LOG(INFO) << "Failed to read Node[" << i << "]'s Truncate, set to 'true'";
-            } else {
-                truncate = nodes[i]["Truncate"].asBool();
-            }
-            LOG(VERBOSE) << "Node[" << i << "]'s Truncate: " << std::boolalpha << truncate
-                         << std::noboolalpha;
-
             bool hold_fd = false;
             if (nodes[i]["HoldFd"].empty() || !nodes[i]["HoldFd"].isBool()) {
                 LOG(INFO) << "Failed to read Node[" << i
@@ -443,8 +428,8 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
                          << hold_fd << std::noboolalpha;
 
             nodes_parsed.emplace_back(std::make_unique<FileNode>(
-                    name, path, values_parsed, static_cast<std::size_t>(default_index), reset,
-                    truncate, hold_fd));
+                name, path, values_parsed,
+                static_cast<std::size_t>(default_index), reset, hold_fd));
         } else {
             nodes_parsed.emplace_back(std::make_unique<PropertyNode>(
                 name, path, values_parsed,
