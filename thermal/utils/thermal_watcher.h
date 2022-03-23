@@ -16,14 +16,6 @@
 
 #pragma once
 
-#include <android-base/chrono_utils.h>
-#include <android-base/unique_fd.h>
-#include <linux/genetlink.h>
-#include <netlink/genl/ctrl.h>
-#include <netlink/genl/genl.h>
-#include <utils/Looper.h>
-#include <utils/Thread.h>
-
 #include <chrono>
 #include <condition_variable>
 #include <future>
@@ -34,6 +26,11 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <android-base/chrono_utils.h>
+#include <android-base/unique_fd.h>
+#include <utils/Looper.h>
+#include <utils/Thread.h>
 
 namespace android {
 namespace hardware {

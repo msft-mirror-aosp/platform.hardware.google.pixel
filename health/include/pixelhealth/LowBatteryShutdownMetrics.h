@@ -17,7 +17,6 @@
 #ifndef HARDWARE_GOOGLE_PIXEL_HEALTH_LOWBATTERYSHUTDOWNMETRICS_H
 #define HARDWARE_GOOGLE_PIXEL_HEALTH_LOWBATTERYSHUTDOWNMETRICS_H
 
-#include <aidl/android/hardware/health/HealthInfo.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
@@ -26,7 +25,6 @@
 #include <math.h>
 #include <time.h>
 #include <utils/Timers.h>
-
 #include <string>
 
 namespace hardware {
@@ -39,9 +37,7 @@ class LowBatteryShutdownMetrics {
     LowBatteryShutdownMetrics(
             const char *const voltage_avg,
             const char *const persist_prop = "persist.vendor.shutdown.voltage_avg");
-    // Deprecated. Use logShutdownVoltage(const HealthInfo&)
     void logShutdownVoltage(struct android::BatteryProperties *props);
-    void logShutdownVoltage(const aidl::android::hardware::health::HealthInfo &health_info);
 
   private:
     const char *const kVoltageAvg;

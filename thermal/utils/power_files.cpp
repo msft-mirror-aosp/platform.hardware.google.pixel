@@ -1,4 +1,3 @@
-
 /*
  * Copyright (C) 2021 The Android Open Source Project
  *
@@ -14,17 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#define ATRACE_TAG (ATRACE_TAG_THERMAL | ATRACE_TAG_HAL)
-
-#include "power_files.h"
+#include <dirent.h>
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
-#include <dirent.h>
-#include <utils/Trace.h>
+
+#include "power_files.h"
 
 namespace android {
 namespace hardware {
@@ -181,7 +177,6 @@ bool PowerFiles::updateEnergyValues(void) {
     std::string deviceEnergyContents;
     std::string line;
 
-    ATRACE_CALL();
     for (const auto &path : energy_path_set_) {
         if (!android::base::ReadFileToString(path, &deviceEnergyContent)) {
             LOG(ERROR) << "Failed to read energy content from " << path;
@@ -326,7 +321,6 @@ bool PowerFiles::throttlingReleaseUpdate(std::string_view sensor_name, std::stri
     std::unique_lock<std::shared_mutex> _lock(throttling_release_map_mutex_);
     float avg_power = -1;
 
-    ATRACE_CALL();
     if (!throttling_release_map_.count(sensor_name.data()) ||
         !throttling_release_map_[sensor_name.data()].count(cdev_name.data()) ||
         !power_status_map_.count(sensor_name.data()) ||
