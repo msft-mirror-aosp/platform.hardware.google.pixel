@@ -107,7 +107,6 @@ struct SensorInfo {
     float multiplier;
     std::chrono::milliseconds polling_delay;
     std::chrono::milliseconds passive_delay;
-    std::chrono::milliseconds time_resolution;
     bool send_cb;
     bool send_powerhint;
     bool is_monitor;

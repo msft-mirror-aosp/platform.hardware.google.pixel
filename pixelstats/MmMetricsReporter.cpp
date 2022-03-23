@@ -25,9 +25,6 @@
 #include <android/binder_manager.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 #include <pixelstats/MmMetricsReporter.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <utils/Log.h>
 
 #define SZ_4K 0x00001000
@@ -94,71 +91,24 @@ const std::vector<MmMetricsReporter::MmMetricsInfo> MmMetricsReporter::kCmaStatu
         {"latency_high", CmaStatusExt::kCmaAllocLatencyHighFieldNumber, false},
 };
 
-static bool file_exists(const char *path) {
-    struct stat sbuf;
-
-    return (stat(path, &sbuf) == 0);
-}
-
-bool MmMetricsReporter::checkKernelMMMetricSupport() {
-    const char *const require_all[] = {
-            kVmstatPath,
-            kGpuTotalPages,
-            kPixelStatMm,
-    };
-    const char *const require_one[] = {
-            kIonTotalPoolsPath,
-            kIonTotalPoolsPathForLegacy,
-    };
-
-    for (auto &path : require_all) {
-        if (!file_exists(path)) {
-            ALOGI("MM Metrics not supported - no %s.", path);
-            return false;
-        }
-    }
-
-    std::string err_msg;
-    for (auto &path : require_one) {
-        if (file_exists(path)) {
-            err_msg.clear();
-            break;
-        }
-        err_msg += path;
-        err_msg += ", ";
-    }
-
-    if (!err_msg.empty()) {
-        err_msg.pop_back();  // remove last space
-        err_msg.pop_back();  // remove last comma
-        ALOGI("MM Metrics not supported - no IonTotalPools path.");
-        return false;
-    }
-    return true;
-}
-
-static bool checkUserBuild() {
-    return android::base::GetProperty("ro.build.type", "") == "user";
-}
+const std::map<std::string, MmMetricsReporter::CmaType> MmMetricsReporter::kCmaTypeInfo = {
+        {"farawimg", MmMetricsReporter::FARAWIMG},  {"faimg", MmMetricsReporter::FAIMG},
+        {"faceauth_tpu", MmMetricsReporter::FATPU}, {"faprev", MmMetricsReporter::FAPREV},
+        {"vframe", MmMetricsReporter::VFRAME},      {"vstream", MmMetricsReporter::VSTREAM},
+};
 
 MmMetricsReporter::MmMetricsReporter()
     : kVmstatPath("/proc/vmstat"),
       kIonTotalPoolsPath("/sys/kernel/dma_heap/total_pools_kb"),
       kIonTotalPoolsPathForLegacy("/sys/kernel/ion/total_pools_kb"),
       kGpuTotalPages("/sys/kernel/pixel_stat/gpu/mem/total_page_count"),
-      kPixelStatMm("/sys/kernel/pixel_stat/mm") {
-    is_user_build_ = checkUserBuild();
-    ker_mm_metrics_support_ = checkKernelMMMetricSupport();
-}
+      kPixelStatMm("/sys/kernel/pixel_stat/mm") {}
 
 bool MmMetricsReporter::ReadFileToUint(const char *const path, uint64_t *val) {
     std::string file_contents;
 
     if (!ReadFileToString(path, &file_contents)) {
-        // Don't print this log if the file doesn't exist, since logs will be printed repeatedly.
-        if (errno != ENOENT) {
-            ALOGI("Unable to read %s - %s", path, strerror(errno));
-        }
+        ALOGI("Unable to read %s - %s", path, strerror(errno));
         return false;
     } else {
         file_contents = android::base::Trim(file_contents);
@@ -302,7 +252,10 @@ void MmMetricsReporter::fillAtomValues(const std::vector<MmMetricsInfo> &metrics
 }
 
 void MmMetricsReporter::logPixelMmMetricsPerHour(const std::shared_ptr<IStats> &stats_client) {
-    if (!MmMetricsSupported())
+    // Currently, we collect these metrics and report this atom only for userdebug_or_eng
+    // We only grant permissions to access sysfs for userdebug_or_eng.
+    // Add a check to avoid unnecessary access.
+    if (android::base::GetProperty("ro.build.type", "") == "user")
         return;
 
     std::map<std::string, uint64_t> vmstat = readVmStat(kVmstatPath);
@@ -337,7 +290,10 @@ void MmMetricsReporter::logPixelMmMetricsPerHour(const std::shared_ptr<IStats> &
 }
 
 void MmMetricsReporter::logPixelMmMetricsPerDay(const std::shared_ptr<IStats> &stats_client) {
-    if (!MmMetricsSupported())
+    // Currently, we collect these metrics and report this atom only for userdebug_or_eng
+    // We only grant permissions to access sysfs for userdebug_or_eng.
+    // Add a check to avoid unnecessary access.
+    if (android::base::GetProperty("ro.build.type", "") == "user")
         return;
 
     std::map<std::string, uint64_t> vmstat = readVmStat(kVmstatPath);
@@ -506,8 +462,8 @@ std::map<std::string, uint64_t> MmMetricsReporter::readCmaStat(
  *
  * stats_client: The Stats service
  * atom_id: The id of atom. It can be PixelAtoms::Atom::kCmaStatus or kCmaStatusExt
- * cma_type: The name of CMA heap.
- * cma_name_offset: The offset of the field cma_heap_name in CmaStatus or CmaStatusExt
+ * cma_type: The name of CMA heap. We only collect metrics from CMA heaps defined
+ *           in kCmaTypeInfo.
  * type_idx: The id of the CMA heap. We add this id in atom values to identify
  *           the CMA status data.
  * metrics_info: This is a vector of MmMetricsInfo {metric, atom_key, update_diff}.
@@ -520,34 +476,23 @@ std::map<std::string, uint64_t> MmMetricsReporter::readCmaStat(
  */
 void MmMetricsReporter::reportCmaStatusAtom(
         const std::shared_ptr<IStats> &stats_client, int atom_id, const std::string &cma_type,
-        int cma_name_offset, const std::vector<MmMetricsInfo> &metrics_info,
-        std::map<std::string, std::map<std::string, uint64_t>> *all_prev_cma_stat) {
+        CmaType type_idx, const std::vector<MmMetricsInfo> &metrics_info,
+        std::map<CmaType, std::map<std::string, uint64_t>> *all_prev_cma_stat) {
     std::map<std::string, uint64_t> cma_stat = readCmaStat(cma_type, metrics_info);
     if (!cma_stat.empty()) {
         std::vector<VendorAtomValue> values;
         VendorAtomValue tmp;
-        // type is an enum value corresponding to the CMA heap name. Since CMA heap name
-        // can be added/removed/modified, it would take effort to maintain the mapping table.
-        // We would like to store CMA heap name directly, so just set type to 0.
-        tmp.set<VendorAtomValue::intValue>(0);
+        tmp.set<VendorAtomValue::intValue>(type_idx);
         values.push_back(tmp);
 
         std::map<std::string, uint64_t> prev_cma_stat;
-        auto entry = all_prev_cma_stat->find(cma_type);
+        auto entry = all_prev_cma_stat->find(type_idx);
         if (entry != all_prev_cma_stat->end())
             prev_cma_stat = entry->second;
 
         bool is_first_atom = (prev_cma_stat.size() == 0) ? true : false;
         fillAtomValues(metrics_info, cma_stat, &prev_cma_stat, &values);
-
-        int size = cma_name_offset - kVendorAtomOffset + 1;
-        if (values.size() < size) {
-            values.resize(size, tmp);
-        }
-        tmp.set<VendorAtomValue::stringValue>(cma_type);
-        values[cma_name_offset - kVendorAtomOffset] = tmp;
-
-        (*all_prev_cma_stat)[cma_type] = prev_cma_stat;
+        (*all_prev_cma_stat)[type_idx] = prev_cma_stat;
         if (!is_first_atom)
             reportVendorAtom(stats_client, atom_id, values, "CmaStatus");
     }
@@ -558,9 +503,6 @@ void MmMetricsReporter::reportCmaStatusAtom(
  * to collect the CMA metrics from kPixelStatMm/cma/<cma_type> and upload them.
  */
 void MmMetricsReporter::logCmaStatus(const std::shared_ptr<IStats> &stats_client) {
-    if (!CmaMetricsSupported())
-        return;
-
     std::string cma_root = android::base::StringPrintf("%s/cma", kPixelStatMm);
     std::unique_ptr<DIR, int (*)(DIR *)> dir(opendir(cma_root.c_str()), closedir);
     if (!dir)
@@ -571,12 +513,14 @@ void MmMetricsReporter::logCmaStatus(const std::shared_ptr<IStats> &stats_client
             continue;
 
         std::string cma_type(dp->d_name);
+        auto type = kCmaTypeInfo.find(cma_type);
+        if (type == kCmaTypeInfo.end())
+            continue;
 
-        reportCmaStatusAtom(stats_client, PixelAtoms::Atom::kCmaStatus, cma_type,
-                            CmaStatus::kCmaHeapNameFieldNumber, kCmaStatusInfo, &prev_cma_stat_);
-        reportCmaStatusAtom(stats_client, PixelAtoms::Atom::kCmaStatusExt, cma_type,
-                            CmaStatusExt::kCmaHeapNameFieldNumber, kCmaStatusExtInfo,
-                            &prev_cma_stat_ext_);
+        reportCmaStatusAtom(stats_client, PixelAtoms::Atom::kCmaStatus, cma_type, type->second,
+                            kCmaStatusInfo, &prev_cma_stat_);
+        reportCmaStatusAtom(stats_client, PixelAtoms::Atom::kCmaStatusExt, cma_type, type->second,
+                            kCmaStatusExtInfo, &prev_cma_stat_ext_);
     }
 }
 

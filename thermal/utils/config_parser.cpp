@@ -310,7 +310,6 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
         }
 
         if (is_virtual_sensor) {
-            bool ret = true;
             values = sensors[i]["Combination"];
             if (values.size()) {
                 linked_sensors.reserve(values.size());
@@ -320,7 +319,8 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
                               << "]: " << linked_sensors[j];
                 }
             } else {
-                ret = false;
+                sensors_parsed.clear();
+                return sensors_parsed;
             }
 
             values = sensors[i]["Coefficient"];
@@ -332,11 +332,8 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
                               << "]: " << coefficients[j];
                 }
             } else {
-                ret = false;
-            }
-
-            if (linked_sensors.size() != coefficients.size()) {
-                ret = false;
+                sensors_parsed.clear();
+                return sensors_parsed;
             }
 
             if (!sensors[i]["Offset"].empty()) {
@@ -344,7 +341,8 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
             }
 
             if (linked_sensors.size() != coefficients.size()) {
-                ret = false;
+                sensors_parsed.clear();
+                return sensors_parsed;
             }
 
             trigger_sensor = sensors[i]["TriggerSensor"].asString();
@@ -357,9 +355,6 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
             } else if (sensors[i]["Formula"].asString().compare("MINIMUM") == 0) {
                 formula = FormulaOption::MINIMUM;
             } else {
-                ret = false;
-            }
-            if (!ret) {
                 sensors_parsed.clear();
                 return sensors_parsed;
             }
@@ -393,15 +388,6 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
             passive_delay = std::chrono::milliseconds(getIntFromValue(sensors[i]["PassiveDelay"]));
         }
         LOG(INFO) << "Sensor[" << name << "]'s Passive delay: " << passive_delay.count();
-
-        std::chrono::milliseconds time_resolution;
-        if (sensors[i]["TimeResolution"].empty()) {
-            time_resolution = kMinPollIntervalMs;
-        } else {
-            time_resolution =
-                    std::chrono::milliseconds(getIntFromValue(sensors[i]["TimeResolution"]));
-        }
-        LOG(INFO) << "Sensor[" << name << "]'s Time resolution: " << time_resolution.count();
 
         bool support_pid = false;
         std::array<float, kThrottlingSeverityCount> k_po;
@@ -680,7 +666,6 @@ std::unordered_map<std::string, SensorInfo> ParseSensorInfo(std::string_view con
                 .multiplier = multiplier,
                 .polling_delay = polling_delay,
                 .passive_delay = passive_delay,
-                .time_resolution = time_resolution,
                 .send_cb = send_cb,
                 .send_powerhint = send_powerhint,
                 .is_monitor = is_monitor,
