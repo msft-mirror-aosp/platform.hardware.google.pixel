@@ -26,10 +26,8 @@
 #include "Power.h"
 #include "PowerExt.h"
 #include "PowerSessionManager.h"
-#include "adaptivecpu/AdaptiveCpu.h"
 #include "disp-power/DisplayLowPower.h"
 
-using aidl::google::hardware::power::impl::pixel::AdaptiveCpu;
 using aidl::google::hardware::power::impl::pixel::DisplayLowPower;
 using aidl::google::hardware::power::impl::pixel::Power;
 using aidl::google::hardware::power::impl::pixel::PowerExt;
@@ -38,19 +36,13 @@ using aidl::google::hardware::power::impl::pixel::PowerSessionManager;
 using ::android::perfmgr::HintManager;
 
 constexpr std::string_view kPowerHalInitProp("vendor.powerhal.init");
-constexpr std::string_view kConfigDebugPathProperty("vendor.powerhal.config.debug");
 constexpr std::string_view kConfigProperty("vendor.powerhal.config");
 constexpr std::string_view kConfigDefaultFileName("powerhint.json");
 
 int main() {
-    std::string config_path = "/vendor/etc/";
-    if (android::base::GetBoolProperty(kConfigDebugPathProperty.data(), false)) {
-        config_path = "/data/vendor/etc/";
-        LOG(WARNING) << "Pixel Power HAL AIDL Service is using debug config from: " << config_path;
-    }
-    config_path.append(
-            android::base::GetProperty(kConfigProperty.data(), kConfigDefaultFileName.data()));
-
+    const std::string config_path =
+            "/vendor/etc/" +
+            android::base::GetProperty(kConfigProperty.data(), kConfigDefaultFileName.data());
     LOG(INFO) << "Pixel Power HAL AIDL Service with Extension is starting with config: "
               << config_path;
 
@@ -65,14 +57,12 @@ int main() {
     // single thread
     ABinderProcess_setThreadPoolMaxThreadCount(0);
 
-    std::shared_ptr<AdaptiveCpu> adaptiveCpu = std::make_shared<AdaptiveCpu>(hm);
-
     // core service
-    std::shared_ptr<Power> pw = ndk::SharedRefBase::make<Power>(hm, dlpw, adaptiveCpu);
+    std::shared_ptr<Power> pw = ndk::SharedRefBase::make<Power>(hm, dlpw);
     ndk::SpAIBinder pwBinder = pw->asBinder();
 
     // extension service
-    std::shared_ptr<PowerExt> pwExt = ndk::SharedRefBase::make<PowerExt>(hm, dlpw, adaptiveCpu);
+    std::shared_ptr<PowerExt> pwExt = ndk::SharedRefBase::make<PowerExt>(hm, dlpw);
 
     // attach the extension to the same binder we will be registering
     CHECK(STATUS_OK == AIBinder_setExtension(pwBinder.get(), pwExt->asBinder().get()));

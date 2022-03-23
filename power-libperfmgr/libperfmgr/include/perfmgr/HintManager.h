@@ -17,14 +17,11 @@
 #ifndef ANDROID_LIBPERFMGR_HINTMANAGER_H_
 #define ANDROID_LIBPERFMGR_HINTMANAGER_H_
 
-#include <android-base/thread_annotations.h>
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -44,12 +41,13 @@ struct HintStats {
 struct HintStatus {
     const std::chrono::milliseconds max_timeout;
     HintStatus() : max_timeout(std::chrono::milliseconds(0)) {}
-    explicit HintStatus(std::chrono::milliseconds max_timeout)
+    HintStatus(std::chrono::milliseconds max_timeout)
         : max_timeout(max_timeout),
           start_time(std::chrono::steady_clock::time_point::min()),
           end_time(std::chrono::steady_clock::time_point::min()) {}
     std::chrono::steady_clock::time_point start_time;
     std::chrono::steady_clock::time_point end_time;
+    std::mutex mutex;
     struct HintStatsInternal {
         HintStatsInternal() : count(0), duration_ms(0) {}
         std::atomic<uint32_t> count;
@@ -60,23 +58,19 @@ struct HintStatus {
 enum class HintActionType { Node, DoHint, EndHint, MaskHint };
 
 struct HintAction {
-    HintAction(HintActionType t, const std::string &v) : type(t), value(v) {}
+    HintAction(HintActionType t, std::string v) : type(t), value(v) {}
     HintActionType type;
     std::string value;
 };
 
 struct Hint {
-    Hint() {}
-    Hint(const Hint &obj)
-        : node_actions(obj.node_actions),
-          hint_actions(obj.hint_actions),
-          mask_requesters(obj.mask_requesters),
-          status(obj.status) {}
+    Hint() : enabled(true) {}
     std::vector<NodeAction> node_actions;
     std::vector<HintAction> hint_actions;
-    mutable std::mutex hint_lock;
-    std::set<std::string> mask_requesters GUARDED_BY(hint_lock);
-    std::shared_ptr<HintStatus> status GUARDED_BY(hint_lock);
+    // No locking for `enabled' flag
+    // There should not be multiple writers
+    bool enabled;
+    std::shared_ptr<HintStatus> status;
 };
 
 // HintManager is the external interface of the library to be used by PowerHAL
@@ -86,7 +80,7 @@ struct Hint {
 class HintManager {
   public:
     HintManager(sp<NodeLooperThread> nm, const std::unordered_map<std::string, Hint> &actions)
-        : nm_(std::move(nm)), actions_(actions) {}
+        : nm_(std::move(nm)), actions_(std::move(actions)) {}
     ~HintManager() {
         if (nm_.get() != nullptr) nm_->Stop();
     }
