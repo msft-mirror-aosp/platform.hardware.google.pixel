@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021 The Android Open Source Project
+// Copyright (C) 2017 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,46 +17,11 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-soong_config_module_type {
-    name: "haptics_feature_cc_defaults",
-    module_type: "cc_defaults",
-    config_namespace: "haptics",
-    variables: [
-        "actuator_model",
-    ],
-    properties: ["cflags"],
-}
-
-soong_config_string_variable {
-    name: "actuator_model",
-    values: [
-        "luxshare_ict_081545",
-        "luxshare_ict_lt_xlra1906d",
-    ],
-}
-
-haptics_feature_cc_defaults {
-    name: "haptics_feature_defaults",
-    soong_config_variables: {
-        actuator_model: {
-            luxshare_ict_081545: {
-                cflags: [
-                    "-DLUXSHARE_ICT_081545",
-                ],
-            },
-            luxshare_ict_lt_xlra1906d: {
-                cflags: [
-                    "-DLUXSHARE_ICT_LT_XLRA1906D",
-                ],
-            },
-        },
-    },
-}
-
 cc_defaults {
     name: "android.hardware.vibrator-defaults.cs40l25",
     cflags: [
         "-DATRACE_TAG=(ATRACE_TAG_VIBRATOR | ATRACE_TAG_HAL)",
+        "-DLOG_TAG=\"android.hardware.vibrator-cs40l25\"",
     ],
     shared_libs: [
         "libbinder",
@@ -85,10 +50,7 @@ cc_defaults {
 
 cc_library_shared {
     name: "android.hardware.vibrator-impl.cs40l25",
-    defaults: [
-        "VibratorHalCs40l25BinaryDefaults",
-        "haptics_feature_defaults",
-    ],
+    defaults: ["VibratorHalCs40l25BinaryDefaults"],
     srcs: ["Vibrator.cpp"],
     include_dirs: [
         "external/tinyalsa/include",
@@ -116,9 +78,6 @@ cc_binary {
         "libcutils",
         "libtinyalsa",
     ],
-    cflags: [
-        "-DLOG_TAG=\"android.hardware.vibrator-cs40l25\"",
-    ],
     proprietary: true,
 }
 
@@ -136,9 +95,6 @@ cc_binary {
         "libcutils",
         "libtinyalsa",
     ],
-    cflags: [
-        "-DVIBRATOR_NAME=\"dual\"",
-        "-DLOG_TAG=\"android.hardware.vibrator-cs40l25-dual\"",
-    ],
+    cflags: ["-DVIBRATOR_NAME=\"dual\""],
     proprietary: true,
 }
