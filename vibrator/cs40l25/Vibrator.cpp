@@ -75,8 +75,6 @@ static constexpr uint32_t MAX_TIME_MS = UINT32_MAX;
 static constexpr float AMP_ATTENUATE_STEP_SIZE = 0.125f;
 static constexpr float EFFECT_FREQUENCY_KHZ = 48.0f;
 
-static constexpr auto ASYNC_COMPLETION_TIMEOUT = std::chrono::milliseconds(100);
-
 static constexpr int32_t COMPOSE_DELAY_MAX_MS = 10000;
 static constexpr int32_t COMPOSE_SIZE_MAX = 127;
 static constexpr int32_t COMPOSE_PWLE_SIZE_MAX_DEFAULT = 127;
@@ -103,6 +101,8 @@ static constexpr float PWLE_FREQUENCY_MIN_HZ = 0.25;
 static constexpr float PWLE_FREQUENCY_MAX_HZ = 1023.75;
 static constexpr float PWLE_BW_MAP_SIZE =
     1 + ((PWLE_FREQUENCY_MAX_HZ - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ);
+static constexpr float RAMP_DOWN_CONSTANT = 1048.576;
+static constexpr float RAMP_DOWN_TIME_MS = 50.0;
 
 static struct pcm_config haptic_nohost_config = {
     .channels = 1,
@@ -119,19 +119,48 @@ static uint8_t amplitudeToScale(float amplitude, float maximum) {
 
 // Discrete points of frequency:max_level pairs as recommended by the document
 // [R4O6] Max. Allowable Chirp Levels (go/r4o6-max-chirp-levels) around resonant frequency
+#if defined(LUXSHARE_ICT_081545)
 static std::map<float, float> discretePwleMaxLevels = {{120.0, 0.4},  {130.0, 0.31}, {140.0, 0.14},
                                                        {145.0, 0.09}, {150.0, 0.15}, {160.0, 0.35},
                                                        {170.0, 0.4}};
+// Discrete points of frequency:max_level pairs as recommended by the document
+// [P7] Max. Allowable Chirp Levels (go/p7-max-chirp-levels) around resonant frequency
+#elif defined(LUXSHARE_ICT_LT_XLRA1906D)
+static std::map<float, float> discretePwleMaxLevels = {{145.0, 0.38}, {150.0, 0.35}, {160.0, 0.35},
+                                                       {170.0, 0.15}, {180.0, 0.35}, {190.0, 0.35},
+                                                       {200.0, 0.38}};
+#else
+static std::map<float, float> discretePwleMaxLevels = {};
+#endif
 
 // Initialize all limits to 0.4 according to the document [R4O6] Max. Allowable Chirp Levels
 // (go/r4o6-max-chirp-levels)
+#if defined(LUXSHARE_ICT_081545)
 std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 0.4);
+// Initialize all limits to 0.38 according to the document [P7] Max. Allowable Chirp Levels
+// (go/p7-max-chirp-levels)
+#elif defined(LUXSHARE_ICT_LT_XLRA1906D)
+std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 0.38);
+#else
+std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 1.0);
+#endif
 
 void Vibrator::createPwleMaxLevelLimitMap() {
     int32_t capabilities;
     Vibrator::getCapabilities(&capabilities);
     if (capabilities & IVibrator::CAP_FREQUENCY_CONTROL) {
         std::map<float, float>::iterator itr0, itr1;
+
+        if (discretePwleMaxLevels.empty()) {
+            return;
+        }
+        if (discretePwleMaxLevels.size() == 1) {
+            itr0 = discretePwleMaxLevels.begin();
+            float pwleMaxLevelLimitMapIdx =
+                    (itr0->first - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ;
+            pwleMaxLevelLimitMap[pwleMaxLevelLimitMapIdx] = itr0->second;
+            return;
+        }
 
         itr0 = discretePwleMaxLevels.begin();
         itr1 = std::next(itr0, 1);
@@ -142,7 +171,7 @@ void Vibrator::createPwleMaxLevelLimitMap() {
             float x1 = itr1->first;
             float y1 = itr1->second;
             float pwleMaxLevelLimitMapIdx =
-                (itr0->first - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ;
+                    (itr0->first - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ;
 
             for (float xp = x0; xp < (x1 + PWLE_FREQUENCY_RESOLUTION_HZ);
                  xp += PWLE_FREQUENCY_RESOLUTION_HZ) {
@@ -235,6 +264,7 @@ Vibrator::Vibrator(std::unique_ptr<HwApi> hwapi, std::unique_ptr<HwCal> hwcal)
 
     createPwleMaxLevelLimitMap();
     mIsUnderExternalControl = false;
+    setPwleRampDown();
 }
 
 ndk::ScopedAStatus Vibrator::getCapabilities(int32_t *_aidl_return) {
@@ -442,10 +472,7 @@ ndk::ScopedAStatus Vibrator::on(uint32_t timeoutMs, uint32_t effectIndex,
         ALOGE("Device is under external control mode. Force to disable it to prevent chip hang "
               "problem.");
     }
-    if (mAsyncHandle.wait_for(ASYNC_COMPLETION_TIMEOUT) != std::future_status::ready) {
-        ALOGE("Previous vibration pending.");
-        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
-    }
+    mHwApi->setActivate(0);
 
     mHwApi->setEffectIndex(effectIndex);
     mHwApi->setDuration(timeoutMs);
@@ -1150,6 +1177,22 @@ fail:
     pcm_close(*haptic_pcm);
     *haptic_pcm = NULL;
     return false;
+}
+
+void Vibrator::setPwleRampDown() {
+    // The formula for calculating the ramp down coefficient to be written into
+    // pwle_ramp_down is as follows:
+    //    Crd = 1048.576 / Trd
+    // where Trd is the desired ramp down time in seconds
+    // pwle_ramp_down accepts only 24 bit integers values
+
+    const float seconds = RAMP_DOWN_TIME_MS / 1000;
+    const auto ramp_down_coefficient = static_cast<uint32_t>(RAMP_DOWN_CONSTANT / seconds);
+
+    if (!mHwApi->setPwleRampDown(ramp_down_coefficient)) {
+        ALOGE("Failed to write \"%d\" to pwle_ramp_down (%d): %s", ramp_down_coefficient, errno,
+              strerror(errno));
+    }
 }
 
 }  // namespace vibrator
