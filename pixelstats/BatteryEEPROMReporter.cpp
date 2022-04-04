@@ -58,32 +58,36 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
         return;
     }
-    ALOGD("checkAndReport:\n%s", file_contents.c_str());
+    ALOGD("checkAndReport: %s", file_contents.c_str());
 
     int16_t i, num;
     struct BatteryHistory hist;
-    const int kHistTotalLen = strlen(file_contents.c_str());
+    const int kHistTotalLen = file_contents.size();
 
     ALOGD("kHistTotalLen=%d\n", kHistTotalLen);
 
-    /* BATT_HIST_NUM_MAX_V2 plan release part to save other information, so use >= here */
     if (kHistTotalLen >= (LINESIZE_V2 * BATT_HIST_NUM_MAX_V2)) {
-        for (i = 0; i < (LINESIZE_V2 * BATT_HIST_NUM_MAX_V2); i = i + LINESIZE_V2) {
-            if (i + LINESIZE_V2 > kHistTotalLen)
+        struct BatteryHistoryExtend histv2;
+        for (i = 0; i < BATT_HIST_NUM_MAX_V2; i++) {
+            size_t history_offset = i * LINESIZE_V2;
+            if (history_offset > file_contents.size())
                 break;
-            history_each = file_contents.substr(i, LINESIZE_V2);
-            struct BatteryHistoryExtend histv2;
-            char data[16];
+            history_each = file_contents.substr(history_offset, LINESIZE_V2);
+            unsigned int data[4];
 
             /* Format transfer: go/gsx01-eeprom */
-            num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 " %4c %4c %4c %4c",
-                        &histv2.tempco, &histv2.rcomp0, &data[12], &data[8], &data[4], &data[0]);
+            num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%x %x %x %x",
+                        &histv2.tempco, &histv2.rcomp0, &data[0], &data[1], &data[2], &data[3]);
 
             if (histv2.tempco == 0xFFFF && histv2.rcomp0 == 0xFFFF)
                 continue;
 
             /* Extract each data */
-            uint64_t tmp = std::stol(data, nullptr, 16);
+            uint64_t tmp = (int64_t)data[3] << 48 |
+                           (int64_t)data[2] << 32 |
+                           (int64_t)data[1] << 16 |
+                           data[0];
+
             /* ignore this data if unreasonable */
             if (tmp <= 0)
                 continue;
@@ -116,39 +120,40 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
             hist.msoc = (uint8_t)histv2.mixsoc * 2;
             hist.full_cap = (int16_t)histv2.fullcaprep * 125 / 1000;
             hist.full_rep = (int16_t)histv2.fullcapnom * 125 / 1000;
-            hist.cycle_cnt = (i/LINESIZE_V2 + 1) * 10;
+            hist.cycle_cnt = (i + 1) * 10;
 
             reportEvent(stats_client, hist);
             report_time_ = getTimeSecs();
         }
-    } else {
-        for (i = 0; i < (LINESIZE * BATT_HIST_NUM_MAX); i = i + LINESIZE) {
-            if (i + LINESIZE > kHistTotalLen)
-                break;
-            history_each = file_contents.substr(i, LINESIZE);
-            num = sscanf(history_each.c_str(),
-                       "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16
-                       "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
-                       "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
-                       "%2" SCNx8 "%2" SCNx8 " %4" SCNx16 "%4" SCNx16
-                       "%4" SCNx16 "%4" SCNx16 "%4" SCNx16,
-                       &hist.cycle_cnt, &hist.full_cap, &hist.esr,
-                       &hist.rslow, &hist.batt_temp, &hist.soh,
-                       &hist.cc_soc, &hist.cutoff_soc, &hist.msoc,
-                       &hist.sys_soc, &hist.reserve, &hist.batt_soc,
-                       &hist.min_temp, &hist.max_temp,  &hist.max_vbatt,
-                       &hist.min_vbatt, &hist.max_ibatt, &hist.min_ibatt,
-                       &hist.checksum);
+        return;
+    }
 
-            if (num != kNumBatteryHistoryFields) {
-                ALOGE("Couldn't process %s", history_each.c_str());
-                continue;
-            }
+    for (i = 0; i < (LINESIZE * BATT_HIST_NUM_MAX); i = i + LINESIZE) {
+        if (i + LINESIZE > kHistTotalLen)
+            break;
+        history_each = file_contents.substr(i, LINESIZE);
+        num = sscanf(history_each.c_str(),
+                   "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16
+                   "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
+                   "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
+                   "%2" SCNx8 "%2" SCNx8 " %4" SCNx16 "%4" SCNx16
+                   "%4" SCNx16 "%4" SCNx16 "%4" SCNx16,
+                   &hist.cycle_cnt, &hist.full_cap, &hist.esr,
+                   &hist.rslow, &hist.batt_temp, &hist.soh,
+                   &hist.cc_soc, &hist.cutoff_soc, &hist.msoc,
+                   &hist.sys_soc, &hist.reserve, &hist.batt_soc,
+                   &hist.min_temp, &hist.max_temp,  &hist.max_vbatt,
+                   &hist.min_vbatt, &hist.max_ibatt, &hist.min_ibatt,
+                   &hist.checksum);
 
-            if (checkLogEvent(hist)) {
-                reportEvent(stats_client, hist);
-                report_time_ = getTimeSecs();
-            }
+        if (num != kNumBatteryHistoryFields) {
+            ALOGE("Couldn't process %s", history_each.c_str());
+            continue;
+        }
+
+        if (checkLogEvent(hist)) {
+            reportEvent(stats_client, hist);
+            report_time_ = getTimeSecs();
         }
     }
 }
@@ -247,16 +252,8 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     values[BatteryEEPROM::kMinIbattFieldNumber - kVendorAtomOffset] = val;
     val.set<VendorAtomValue::intValue>(hist.checksum);
     values[BatteryEEPROM::kChecksumFieldNumber - kVendorAtomOffset] = val;
-    val.set<VendorAtomValue::intValue>(hist.tempco);
-    values[BatteryEEPROM::kTempcoFieldNumber - kVendorAtomOffset] = val;
-    val.set<VendorAtomValue::intValue>(hist.rcomp0);
-    values[BatteryEEPROM::kRcomp0FieldNumber - kVendorAtomOffset] = val;
-    val.set<VendorAtomValue::intValue>(hist.timer_h);
-    values[BatteryEEPROM::kTimerHFieldNumber - kVendorAtomOffset] = val;
-    val.set<VendorAtomValue::intValue>(hist.full_rep);
-    values[BatteryEEPROM::kFullRepFieldNumber - kVendorAtomOffset] = val;
 
-    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
+    VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);

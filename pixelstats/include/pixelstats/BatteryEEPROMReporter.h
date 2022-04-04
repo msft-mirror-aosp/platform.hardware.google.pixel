@@ -99,7 +99,6 @@ class BatteryEEPROMReporter {
         int16_t min_ibatt;
         /* Field used to verify the integrity of the EEPROM data */
         uint16_t checksum;
-
         /* Extend data for P21 */
         /* Temperature compensation information */
         uint16_t tempco;
@@ -110,7 +109,7 @@ class BatteryEEPROMReporter {
          /* The full capacity of the battery learning at the end of every charge cycle */
         uint16_t full_rep;
     };
-    /* The number of elements for P20 series */
+    /* The number of elements in struct BatteryHistory for P20 series */
     const int kNumBatteryHistoryFields = 19;
 
     /* P21 history format */
