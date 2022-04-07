@@ -362,11 +362,11 @@ ThermalHelper::ThermalHelper(const NotificationCallback &cb)
 
         if (name_status_pair.second.virtual_sensor_info != nullptr &&
             !name_status_pair.second.virtual_sensor_info->trigger_sensor.empty() &&
-            name_status_pair.second.is_monitor) {
+            name_status_pair.second.is_watch) {
             if (sensor_info_map_.count(
                         name_status_pair.second.virtual_sensor_info->trigger_sensor)) {
                 sensor_info_map_[name_status_pair.second.virtual_sensor_info->trigger_sensor]
-                        .is_monitor = true;
+                        .is_watch = true;
             } else {
                 LOG(FATAL) << "Could not find " << name_status_pair.first << "'s trigger sensor: "
                            << name_status_pair.second.virtual_sensor_info->trigger_sensor;
@@ -481,7 +481,7 @@ bool ThermalHelper::readTemperature(
     std::pair<ThrottlingSeverity, ThrottlingSeverity> status =
         std::make_pair(ThrottlingSeverity::NONE, ThrottlingSeverity::NONE);
     // Only update status if the thermal sensor is being monitored
-    if (sensor_info.is_monitor) {
+    if (sensor_info.is_watch) {
         ThrottlingSeverity prev_hot_severity, prev_cold_severity;
         {
             // reader lock, readTemperature will be called in Binder call and the watcher thread.
@@ -896,7 +896,7 @@ void ThermalHelper::initializeTrip(const std::unordered_map<std::string, std::st
                                    std::set<std::string> *monitored_sensors,
                                    bool thermal_genl_enabled) {
     for (auto &sensor_info : sensor_info_map_) {
-        if (!sensor_info.second.is_monitor || (sensor_info.second.virtual_sensor_info != nullptr)) {
+        if (!sensor_info.second.is_watch || (sensor_info.second.virtual_sensor_info != nullptr)) {
             continue;
         }
 
@@ -968,21 +968,24 @@ void ThermalHelper::initializeTrip(const std::unordered_map<std::string, std::st
 }
 
 bool ThermalHelper::fillTemperatures(hidl_vec<Temperature_1_0> *temperatures) {
-    temperatures->resize(sensor_info_map_.size());
-    int current_index = 0;
+    std::vector<Temperature_1_0> ret;
     for (const auto &name_info_pair : sensor_info_map_) {
         Temperature_1_0 temp;
 
+        if (name_info_pair.second.is_hidden) {
+            continue;
+        }
+
         if (readTemperature(name_info_pair.first, &temp)) {
-            (*temperatures)[current_index] = temp;
+            ret.emplace_back(std::move(temp));
         } else {
             LOG(ERROR) << __func__
                        << ": error reading temperature for sensor: " << name_info_pair.first;
-            return false;
         }
-        ++current_index;
     }
-    return current_index > 0;
+    *temperatures = ret;
+
+    return ret.size() > 0;
 }
 
 bool ThermalHelper::fillCurrentTemperatures(bool filterType, bool filterCallback,
@@ -991,6 +994,11 @@ bool ThermalHelper::fillCurrentTemperatures(bool filterType, bool filterCallback
     std::vector<Temperature_2_0> ret;
     for (const auto &name_info_pair : sensor_info_map_) {
         Temperature_2_0 temp;
+
+        if (name_info_pair.second.is_hidden) {
+            continue;
+        }
+
         if (filterType && name_info_pair.second.type != type) {
             continue;
         }
@@ -1013,6 +1021,11 @@ bool ThermalHelper::fillTemperatureThresholds(bool filterType, TemperatureType_2
     std::vector<TemperatureThreshold> ret;
     for (const auto &name_info_pair : sensor_info_map_) {
         TemperatureThreshold temp;
+
+        if (name_info_pair.second.is_hidden) {
+            continue;
+        }
+
         if (filterType && name_info_pair.second.type != type) {
             continue;
         }
@@ -1170,7 +1183,7 @@ std::chrono::milliseconds ThermalHelper::thermalWatcherCallbackFunc(
         const SensorInfo &sensor_info = sensor_info_map_.at(name_status_pair.first);
 
         // Only handle the sensors in allow list
-        if (!sensor_info.is_monitor) {
+        if (!sensor_info.send_cb) {
             continue;
         }
 
