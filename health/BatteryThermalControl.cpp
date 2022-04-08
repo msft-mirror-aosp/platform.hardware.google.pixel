@@ -21,8 +21,6 @@ namespace google {
 namespace pixel {
 namespace health {
 
-using android::base::GetIntProperty;
-
 BatteryThermalControl::BatteryThermalControl(const std::string &path) : mThermalSocMode(path) {
     mStatus = true;
 }
@@ -43,14 +41,9 @@ void BatteryThermalControl::setThermalMode(bool isEnable, bool isWeakCharger) {
 }
 
 void BatteryThermalControl::updateThermalState(const struct android::BatteryProperties *props) {
-    int bcl_disable = GetIntProperty("persist.vendor.disable.bcl.control", 0);
-
-    if (bcl_disable)
-        setThermalMode(false, true);
-    else
-        setThermalMode(props->batteryStatus != android::BATTERY_STATUS_CHARGING &&
-                               props->batteryStatus != android::BATTERY_STATUS_FULL,
-                       props->maxChargingCurrent * props->maxChargingVoltage < 37500000);
+    setThermalMode(props->batteryStatus != android::BATTERY_STATUS_CHARGING &&
+                           props->batteryStatus != android::BATTERY_STATUS_FULL,
+                   props->maxChargingCurrent * props->maxChargingVoltage < 37500000);
 }
 
 }  // namespace health

@@ -46,8 +46,7 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     bool setSequencer(std::string value) override { return set(value, &mSequencer); }
     bool setScale(uint8_t value) override { return set(value, &mScale); }
     bool setCtrlLoop(bool value) override { return set(value, &mCtrlLoop); }
-    bool setLpTriggerEffect(uint32_t value) override { return set(value, &mLpTriggerEffect); }
-    bool setLpTriggerScale(uint8_t value) override { return set(value, &mLpTriggerScale); }
+    bool setLpTriggerEffect(uint32_t value) override { return set(value, &mLpTrigger); }
     bool setLraWaveShape(uint32_t value) override { return set(value, &mLraWaveShape); }
     bool setOdClamp(uint32_t value) override { return set(value, &mOdClamp); }
     void debug(int fd) override { HwApiBase::debug(fd); }
@@ -64,8 +63,7 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         open("device/set_sequencer", &mSequencer);
         open("device/scale", &mScale);
         open("device/ctrl_loop", &mCtrlLoop);
-        open("device/lp_trigger_effect", &mLpTriggerEffect);
-        open("device/lp_trigger_scale", &mLpTriggerScale);
+        open("device/lp_trigger_effect", &mLpTrigger);
         open("device/lra_wave_shape", &mLraWaveShape);
         open("device/od_clamp", &mOdClamp);
     }
@@ -81,8 +79,7 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     std::ofstream mSequencer;
     std::ofstream mScale;
     std::ofstream mCtrlLoop;
-    std::ofstream mLpTriggerEffect;
-    std::ofstream mLpTriggerScale;
+    std::ofstream mLpTrigger;
     std::ofstream mLraWaveShape;
     std::ofstream mOdClamp;
 };

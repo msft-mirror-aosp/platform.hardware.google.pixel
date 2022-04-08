@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#pragma once
+#ifndef THERMAL_UTILS_THERMAL_WATCHER_H_
+#define THERMAL_UTILS_THERMAL_WATCHER_H_
 
 #include <chrono>
 #include <condition_variable>
@@ -40,12 +40,12 @@ namespace implementation {
 
 using android::base::boot_clock;
 using android::base::unique_fd;
-using WatcherCallback = std::function<std::chrono::milliseconds(const std::set<std::string> &name)>;
+using WatcherCallback = std::function<bool(const std::set<std::string> &name)>;
 
 // A helper class for monitoring thermal files changes.
 class ThermalWatcher : public ::android::Thread {
   public:
-    explicit ThermalWatcher(const WatcherCallback &cb)
+    ThermalWatcher(const WatcherCallback &cb)
         : Thread(false), cb_(cb), looper_(new Looper(true)) {}
     ~ThermalWatcher() = default;
 
@@ -58,10 +58,7 @@ class ThermalWatcher : public ::android::Thread {
     // Give the file watcher a list of files to start watching. This helper
     // class will by default wait for modifications to the file with a looper.
     // This should be called before starting watcher thread.
-    // For monitoring uevents.
-    void registerFilesToWatch(const std::set<std::string> &sensors_to_watch);
-    // For monitoring thermal genl events.
-    void registerFilesToWatchNl(const std::set<std::string> &sensors_to_watch);
+    void registerFilesToWatch(const std::set<std::string> &sensors_to_watch, bool uevent_monitor);
     // Wake up the looper thus the worker thread, immediately. This can be called
     // in any thread.
     void wake();
@@ -76,9 +73,6 @@ class ThermalWatcher : public ::android::Thread {
     // Parse uevent message
     void parseUevent(std::set<std::string> *sensor_name);
 
-    // Parse thermal netlink message
-    void parseGenlink(std::set<std::string> *sensor_name);
-
     // Maps watcher filer descriptor to watched file path.
     std::unordered_map<int, std::string> watch_to_file_path_map_;
 
@@ -92,16 +86,14 @@ class ThermalWatcher : public ::android::Thread {
 
     // For uevent socket registration.
     android::base::unique_fd uevent_fd_;
-    // For thermal genl socket registration.
-    android::base::unique_fd thermal_genl_fd_;
     // Sensor list which monitor flag is enabled.
     std::set<std::string> monitored_sensors_;
-    // Sleep interval voting result
-    std::chrono::milliseconds sleep_ms_;
+    // Flag to point out if any sensor across the first threshold.
+    bool thermal_triggered_;
+    // Flag to point out if device can support uevent notify.
+    bool is_polling_;
     // Timestamp for last thermal update
     boot_clock::time_point last_update_time_;
-    // For thermal genl socket object.
-    struct nl_sock *sk_thermal;
 };
 
 }  // namespace implementation
@@ -109,3 +101,5 @@ class ThermalWatcher : public ::android::Thread {
 }  // namespace thermal
 }  // namespace hardware
 }  // namespace android
+
+#endif  // THERMAL_UTILS_THERMAL_WATCHER_H_

@@ -16,11 +16,11 @@
 
 #include "HardwareBase.h"
 
-#include <cutils/properties.h>
-#include <log/log.h>
-
 #include <fstream>
 #include <sstream>
+
+#include <cutils/properties.h>
+#include <log/log.h>
 
 #include "utils.h"
 

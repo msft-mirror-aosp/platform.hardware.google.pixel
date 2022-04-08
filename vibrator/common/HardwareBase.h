@@ -82,7 +82,6 @@ class HwApiBase {
     NamesMap mNames;
     Records mRecords{RECORDS_SIZE};
     std::mutex mRecordsMutex;
-    std::mutex mIoMutex;
 };
 
 #define HWAPI_RECORD(args...) HwApiBase::record(__FUNCTION__, ##args)
@@ -96,7 +95,6 @@ void HwApiBase::open(const std::string &name, T *stream) {
 template <typename T>
 bool HwApiBase::get(T *value, std::istream *stream) {
     ATRACE_NAME("HwApi::get");
-    std::scoped_lock ioLock{mIoMutex};
     bool ret;
     stream->seekg(0);
     *stream >> *value;
@@ -112,7 +110,6 @@ template <typename T>
 bool HwApiBase::set(const T &value, std::ostream *stream) {
     ATRACE_NAME("HwApi::set");
     using utils::operator<<;
-    std::scoped_lock ioLock{mIoMutex};
     bool ret;
     *stream << value << std::endl;
     if (!(ret = !!*stream)) {

@@ -16,16 +16,9 @@
 
 #pragma once
 
-#include <string_view>
-
 #include <android-base/unique_fd.h>
 
-namespace aidl {
-namespace google {
-namespace hardware {
-namespace power {
-namespace impl {
-namespace pixel {
+#include <string_view>
 
 class DisplayLowPower {
   public:
@@ -39,13 +32,6 @@ class DisplayLowPower {
     int SendPpsCommand(const std::string_view cmd);
     void SetFoss(bool enable);
 
-    ::android::base::unique_fd mPpsSocket;
+    android::base::unique_fd mPpsSocket;
     bool mFossStatus;
 };
-
-}  // namespace pixel
-}  // namespace impl
-}  // namespace power
-}  // namespace hardware
-}  // namespace google
-}  // namespace aidl

@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef THERMAL_UTILS_THERMAL_FILES_H_
+#define THERMAL_UTILS_THERMAL_FILES_H_
 
 #include <string>
 #include <unordered_map>
@@ -39,7 +40,6 @@ class ThermalFiles {
     // data to empty and return false. If the thermal_name is found and its content
     // is read, this function will fill in data accordingly then return true.
     bool readThermalFile(std::string_view thermal_name, std::string *data) const;
-    bool writeCdevFile(std::string_view thermal_name, std::string_view data);
     size_t getNumThermalFiles() const { return thermal_name_to_path_map_.size(); }
 
   private:
@@ -51,3 +51,5 @@ class ThermalFiles {
 }  // namespace thermal
 }  // namespace hardware
 }  // namespace android
+
+#endif  // THERMAL_UTILS_THERMAL_FILES_H_

@@ -19,23 +19,19 @@
 #include <chre_host/host_protocol_host.h>
 #include <chre_host/socket_client.h>
 
-#include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
-#include <pixelstats/StatsHelper.h>
-
+#include <android/frameworks/stats/1.0/IStats.h>
 #define LOG_TAG "pixelstats-vendor"
 #include <log/log.h>
 
 #include <inttypes.h>
 #include <math.h>
 
-using aidl::android::frameworks::stats::IStats;
-using aidl::android::frameworks::stats::VendorAtom;
-using aidl::android::frameworks::stats::VendorAtomValue;
 using android::sp;
 using android::chre::HostProtocolHost;
 using android::chre::IChreMessageHandlers;
 using android::chre::SocketClient;
-using android::hardware::google::pixel::PixelAtoms::VendorPhysicalDropDetected;
+using android::frameworks::stats::V1_0::IStats;
+using android::frameworks::stats::V1_0::PhysicalDropDetected;
 
 // following convention of CHRE code.
 namespace fbs = ::chre::fbs;
@@ -73,14 +69,12 @@ enum DropConstants {
     kDropEventDetectionV2 = 6,
 };
 
-void requestNanoappList(SocketClient *client) {
-    if (client != nullptr) {
-        flatbuffers::FlatBufferBuilder builder(64);
-        HostProtocolHost::encodeNanoappListRequest(builder);
+void requestNanoappList(SocketClient &client) {
+    flatbuffers::FlatBufferBuilder builder(64);
+    HostProtocolHost::encodeNanoappListRequest(builder);
 
-        if (!client->sendMessage(builder.GetBufferPointer(), builder.GetSize())) {
-            ALOGE("Failed to send NanoappList request");
-        }
+    if (!client.sendMessage(builder.GetBufferPointer(), builder.GetSize())) {
+        ALOGE("Failed to send NanoappList request");
     }
 }
 
@@ -98,7 +92,7 @@ sp<DropDetect> DropDetect::start(const uint64_t drop_detect_app_id, const char *
 }
 
 void DropDetect::onConnected() {
-    requestNanoappList(this);
+    requestNanoappList(*this);
 }
 
 /**
@@ -128,7 +122,7 @@ void DropDetect::handleNanoappListResponse(const fbs::NanoappListResponseT &resp
     ALOGE("Drop Detect app not found");
 }
 
-static VendorPhysicalDropDetected dropEventFromNanoappPayload(const struct DropEventPayload *p) {
+static PhysicalDropDetected dropEventFromNanoappPayload(const struct DropEventPayload *p) {
     ALOGI("Received drop detect message! Confidence %f Peak %f Duration %g",
           p->confidence, p->accel_magnitude_peak, p->free_fall_duration_ns / 1e9);
 
@@ -138,14 +132,12 @@ static VendorPhysicalDropDetected dropEventFromNanoappPayload(const struct DropE
     int32_t accel_magnitude_peak_1000ths_g = p->accel_magnitude_peak * 1000.0;
     int32_t free_fall_duration_ms = p->free_fall_duration_ns / 1000000;
 
-    VendorPhysicalDropDetected drop_info;
-    drop_info.set_confidence_pctg(confidence);
-    drop_info.set_accel_peak_thousandths_g(accel_magnitude_peak_1000ths_g);
-    drop_info.set_freefall_time_millis(free_fall_duration_ms);
-    return drop_info;
+    return PhysicalDropDetected{ confidence,
+                                 accel_magnitude_peak_1000ths_g,
+                                 free_fall_duration_ms };
 }
 
-static VendorPhysicalDropDetected dropEventFromNanoappPayload(const struct DropEventPayloadV2 *p) {
+static PhysicalDropDetected dropEventFromNanoappPayload(const struct DropEventPayloadV2 *p) {
     ALOGI("Received drop detect message: "
           "duration %g ms, impact acceleration: x = %f, y = %f, z = %f",
           p->free_fall_duration_ns / 1e6,
@@ -167,21 +159,22 @@ static VendorPhysicalDropDetected dropEventFromNanoappPayload(const struct DropE
 
     int32_t free_fall_duration_ms = static_cast<int32_t>(p->free_fall_duration_ns / 1000000);
 
-    VendorPhysicalDropDetected drop_info;
-    drop_info.set_confidence_pctg(confidence_percentage);
-    drop_info.set_accel_peak_thousandths_g(static_cast<int32_t>(impact_magnitude * 1000));
-    drop_info.set_freefall_time_millis(free_fall_duration_ms);
-    return drop_info;
+    return PhysicalDropDetected{
+        .confidencePctg = confidence_percentage,
+        .accelPeak = static_cast<int32_t>(impact_magnitude * 1000),
+        .freefallDuration = free_fall_duration_ms,
+    };
 }
 
-static void reportDropEventToStatsd(const VendorPhysicalDropDetected &drop) {
-    const std::shared_ptr<IStats> stats_client = getStatsService();
+static void reportDropEventToStatsd(const PhysicalDropDetected& drop) {
+    sp<IStats> stats_client = IStats::tryGetService();
     if (!stats_client) {
-        ALOGE("Unable to get AIDL Stats service");
-        return;
+        ALOGE("Unable to connect to Stats service");
+    } else {
+        Return<void> ret = stats_client->reportPhysicalDropDetected(drop);
+        if (!ret.isOk())
+            ALOGE("Unable to report physical drop to Stats service");
     }
-
-    reportPhysicalDropDetected(stats_client, drop);
 }
 
 /**

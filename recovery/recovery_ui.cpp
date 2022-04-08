@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#include <dlfcn.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -65,18 +64,6 @@ bool WipeTitanM() {
     return true;
 }
 
-/** Call device-specifc WipeKeys function, if any. */
-bool WipeKeysHook(::RecoveryUI *const ui) {
-    bool *(*WipeKeysFunc)(::RecoveryUI *const);
-    reinterpret_cast<void *&>(WipeKeysFunc) = dlsym(RTLD_DEFAULT, "WipeKeys");
-    if (WipeKeysFunc == nullptr) {
-        LOG(INFO) << "No WipeKeys implementation";
-        return true;
-    }
-
-    return (*WipeKeysFunc)(ui);
-}
-
 // Wipes the provisioned flag as part of data wipe.
 bool WipeProvisionedFlag() {
     // Must be consistent with the one in init.hardware.rc (10-byte `theme-dark`).
@@ -111,20 +98,11 @@ class PixelDevice : public ::Device {
     /** Hook to wipe user data not stored in /data */
     bool PostWipeData() override {
         // Try to do everything but report a failure if anything wasn't successful
-        bool totalSuccess = false;
+        bool totalSuccess = true;
         ::RecoveryUI* const ui = GetUI();
 
         ui->Print("Wiping Titan M...\n");
-
-        uint32_t retries = 5;
-        while (retries--) {
-            if (WipeTitanM()) {
-                totalSuccess = true;
-                break;
-            }
-        }
-
-        if (!WipeKeysHook(ui)) {
+        if (!WipeTitanM()) {
             totalSuccess = false;
         }
 
