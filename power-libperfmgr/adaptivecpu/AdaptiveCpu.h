@@ -26,6 +26,7 @@
 
 #include "AdaptiveCpuConfig.h"
 #include "AdaptiveCpuStats.h"
+#include "Device.h"
 #include "KernelCpuFeatureReader.h"
 #include "Model.h"
 #include "WorkDurationProcessor.h"
@@ -47,7 +48,7 @@ using ::android::perfmgr::HintManager;
 // with the exception of ReportWorkDuration, which can be called from an arbitrary thread.
 class AdaptiveCpu {
   public:
-    AdaptiveCpu(std::shared_ptr<HintManager> hintManager);
+    AdaptiveCpu();
 
     bool IsEnabled() const;
 
@@ -67,9 +68,6 @@ class AdaptiveCpu {
     static constexpr char HINT_NAME[] = "ADAPTIVE_CPU";
 
   private:
-    static const std::unordered_map<ThrottleDecision, std::vector<std::string>>
-            kThrottleDecisionToHintNames;
-
     void StartThread();
 
     void SuspendThread();
@@ -84,8 +82,6 @@ class AdaptiveCpu {
     KernelCpuFeatureReader mKernelCpuFeatureReader;
     AdaptiveCpuStats mAdaptiveCpuStats;
     const TimeSource mTimeSource;
-
-    std::shared_ptr<HintManager> mHintManager;
 
     // The thread in which work durations are processed.
     std::thread mLoopThread;
@@ -103,6 +99,7 @@ class AdaptiveCpu {
     bool mIsInitialized = false;
     volatile bool mShouldReloadConfig = false;
     std::chrono::nanoseconds mLastEnabledHintTime;
+    Device mDevice;
     AdaptiveCpuConfig mConfig = AdaptiveCpuConfig::DEFAULT;
 };
 
