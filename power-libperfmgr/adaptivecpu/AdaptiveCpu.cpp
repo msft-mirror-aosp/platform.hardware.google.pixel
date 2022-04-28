@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "powerhal-libperfmgr"
+#define LOG_TAG "powerhal-adaptivecpu"
 #define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 
 #include "AdaptiveCpu.h"
@@ -22,6 +22,7 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <perfmgr/HintManager.h>
 #include <sys/resource.h>
 #include <utils/Trace.h>
 
@@ -39,12 +40,13 @@ namespace power {
 namespace impl {
 namespace pixel {
 
+using ::android::perfmgr::HintManager;
+
 // We pass the previous N ModelInputs to the model, including the most recent ModelInput.
 constexpr uint32_t kNumHistoricalModelInputs = 3;
 
 // TODO(b/207662659): Add config for changing between different reader types.
-AdaptiveCpu::AdaptiveCpu(std::shared_ptr<HintManager> hintManager)
-    : mCpuLoadReader(std::make_unique<CpuLoadReaderSysDevices>()), mHintManager(hintManager) {}
+AdaptiveCpu::AdaptiveCpu() {}
 
 bool AdaptiveCpu::IsEnabled() const {
     return mIsEnabled;
@@ -128,7 +130,10 @@ void AdaptiveCpu::RunMainLoop() {
         }
 
         if (mShouldReloadConfig) {
-            mConfig = AdaptiveCpuConfig::ReadFromSystemProperties();
+            if (!AdaptiveCpuConfig::ReadFromSystemProperties(&mConfig)) {
+                mIsEnabled = false;
+                continue;
+            }
             LOG(INFO) << "Read config: " << mConfig;
             mShouldReloadConfig = false;
         }
@@ -137,14 +142,11 @@ void AdaptiveCpu::RunMainLoop() {
         mAdaptiveCpuStats.RegisterStartRun();
 
         if (!mIsInitialized) {
-            if (!mCpuFrequencyReader.init()) {
+            if (!mKernelCpuFeatureReader.Init()) {
                 mIsEnabled = false;
                 continue;
             }
-            if (!mCpuLoadReader->Init()) {
-                mIsEnabled = false;
-                continue;
-            }
+            mDevice = ReadDevice();
             mIsInitialized = true;
         }
 
@@ -159,23 +161,8 @@ void AdaptiveCpu::RunMainLoop() {
             continue;
         }
 
-        std::vector<CpuPolicyAverageFrequency> cpuPolicyFrequencies;
-        if (!mCpuFrequencyReader.getRecentCpuPolicyFrequencies(&cpuPolicyFrequencies)) {
-            mIsEnabled = false;
-            continue;
-        }
-        LOG(VERBOSE) << "Got CPU frequencies: " << cpuPolicyFrequencies.size();
-        for (const auto &cpuPolicyFrequency : cpuPolicyFrequencies) {
-            LOG(VERBOSE) << "policy=" << cpuPolicyFrequency.policyId
-                         << ", freq=" << cpuPolicyFrequency.averageFrequencyHz;
-        }
-        // TODO(mishaw): Move SetCpuFrequencies logic to CpuFrequencyReader.
-        if (!modelInput.SetCpuFreqiencies(cpuPolicyFrequencies)) {
-            mIsEnabled = false;
-            continue;
-        }
-
-        if (!mCpuLoadReader->GetRecentCpuLoads(&modelInput.cpuCoreIdleTimesPercentage)) {
+        if (!mKernelCpuFeatureReader.GetRecentCpuFeatures(&modelInput.cpuPolicyAverageFrequencyHz,
+                                                          &modelInput.cpuCoreIdleTimesPercentage)) {
             mIsEnabled = false;
             continue;
         }
@@ -192,11 +179,12 @@ void AdaptiveCpu::RunMainLoop() {
 
         if (throttleDecision != previousThrottleDecision) {
             ATRACE_NAME("sendHints");
-            for (const auto &hintName : kThrottleDecisionToHintNames.at(throttleDecision)) {
-                mHintManager->DoHint(hintName, mConfig.hintTimeout);
+            for (const auto &hintName : THROTTLE_DECISION_TO_HINT_NAMES.at(throttleDecision)) {
+                HintManager::GetInstance()->DoHint(hintName, mConfig.hintTimeout);
             }
-            for (const auto &hintName : kThrottleDecisionToHintNames.at(previousThrottleDecision)) {
-                mHintManager->EndHint(hintName);
+            for (const auto &hintName :
+                 THROTTLE_DECISION_TO_HINT_NAMES.at(previousThrottleDecision)) {
+                HintManager::GetInstance()->EndHint(hintName);
             }
             previousThrottleDecision = throttleDecision;
         }
@@ -216,35 +204,13 @@ void AdaptiveCpu::DumpToFd(int fd) const {
     result << "========== Begin Adaptive CPU stats ==========\n";
     result << "Enabled: " << mIsEnabled << "\n";
     result << "Config: " << mConfig << "\n";
-    result << "CPU frequencies per policy:\n";
-    const auto previousCpuPolicyFrequencies = mCpuFrequencyReader.getPreviousCpuPolicyFrequencies();
-    for (const auto &[policyId, cpuFrequencies] : previousCpuPolicyFrequencies) {
-        result << "- Policy=" << policyId << "\n";
-        for (const auto &[frequencyHz, time] : cpuFrequencies) {
-            result << "  - frequency=" << frequencyHz << "Hz, time=" << time.count() << "ms\n";
-        }
-    }
-    mCpuLoadReader->DumpToStream(result);
+    mKernelCpuFeatureReader.DumpToStream(result);
     mAdaptiveCpuStats.DumpToStream(result);
     result << "==========  End Adaptive CPU stats  ==========\n";
     if (!::android::base::WriteStringToFd(result.str(), fd)) {
         PLOG(ERROR) << "Failed to dump state to fd";
     }
 }
-
-const std::unordered_map<ThrottleDecision, std::vector<std::string>>
-        AdaptiveCpu::kThrottleDecisionToHintNames = {
-                {ThrottleDecision::NO_THROTTLE, {}},
-                {ThrottleDecision::THROTTLE_50,
-                 {"LOW_POWER_LITTLE_CLUSTER_50", "LOW_POWER_MID_CLUSTER_50", "LOW_POWER_CPU_50"}},
-                {ThrottleDecision::THROTTLE_60,
-                 {"LOW_POWER_LITTLE_CLUSTER_60", "LOW_POWER_MID_CLUSTER_60", "LOW_POWER_CPU_60"}},
-                {ThrottleDecision::THROTTLE_70,
-                 {"LOW_POWER_LITTLE_CLUSTER_70", "LOW_POWER_MID_CLUSTER_70", "LOW_POWER_CPU_70"}},
-                {ThrottleDecision::THROTTLE_80,
-                 {"LOW_POWER_LITTLE_CLUSTER_80", "LOW_POWER_MID_CLUSTER_80", "LOW_POWER_CPU_80"}},
-                {ThrottleDecision::THROTTLE_90,
-                 {"LOW_POWER_LITTLE_CLUSTER_90", "LOW_POWER_MID_CLUSTER_90", "LOW_POWER_CPU_90"}}};
 
 }  // namespace pixel
 }  // namespace impl

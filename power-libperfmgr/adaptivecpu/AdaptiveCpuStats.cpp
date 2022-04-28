@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "powerhal-libperfmgr"
+#define LOG_TAG "powerhal-adaptivecpu"
 #define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 
 #include "AdaptiveCpuStats.h"
@@ -61,7 +61,7 @@ void AdaptiveCpuStats::RegisterSuccessfulRun(ThrottleDecision previousThrottleDe
     mLastRunSuccessTime = runSuccessTime;
 }
 
-void AdaptiveCpuStats::DumpToStream(std::stringstream &stream) const {
+void AdaptiveCpuStats::DumpToStream(std::ostream &stream) const {
     stream << "Stats:\n";
     stream << "- Successful runs / total runs: " << mNumSuccessfulRuns << " / " << mNumStartedRuns
            << "\n";

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "powerhal-libperfmgr"
+#define LOG_TAG "powerhal-adaptivecpu"
 #define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 
 #include "CpuLoadReaderProcStat.h"
@@ -82,7 +82,7 @@ bool CpuLoadReaderProcStat::ReadCpuTimes(std::map<uint32_t, CpuTime> *result) {
     ATRACE_CALL();
 
     std::unique_ptr<std::istream> file;
-    if (!mFilesystem->readFileStream("/proc/stat", &file)) {
+    if (!mFilesystem->ReadFileStream("/proc/stat", &file)) {
         return false;
     }
     std::string line;

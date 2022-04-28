@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "powerhal-libperfmgr"
+#define LOG_TAG "powerhal-adaptivecpu"
 #define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 
 #include "RealFilesystem.h"
@@ -33,7 +33,7 @@ namespace power {
 namespace impl {
 namespace pixel {
 
-bool RealFilesystem::listDirectory(const std::string &path,
+bool RealFilesystem::ListDirectory(const std::string &path,
                                    std::vector<std::string> *result) const {
     ATRACE_CALL();
     // We can't use std::filesystem, see aosp/894015 & b/175635923.
@@ -49,12 +49,20 @@ bool RealFilesystem::listDirectory(const std::string &path,
     return true;
 }
 
-bool RealFilesystem::readFileStream(const std::string &path,
+bool RealFilesystem::ReadFileStream(const std::string &path,
                                     std::unique_ptr<std::istream> *result) const {
     ATRACE_CALL();
     *result = std::make_unique<std::ifstream>(path);
     if ((*result)->fail()) {
         LOG(ERROR) << "Failed to read file stream: " << path;
+        return false;
+    }
+    return true;
+}
+
+bool RealFilesystem::ResetFileStream(const std::unique_ptr<std::istream> &fileStream) const {
+    if (fileStream->seekg(0).bad()) {
+        LOG(ERROR) << "Failed to reset file stream";
         return false;
     }
     return true;
