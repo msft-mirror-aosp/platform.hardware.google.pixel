@@ -22,6 +22,7 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <perfmgr/HintManager.h>
 #include <sys/resource.h>
 #include <utils/Trace.h>
 
@@ -39,11 +40,13 @@ namespace power {
 namespace impl {
 namespace pixel {
 
+using ::android::perfmgr::HintManager;
+
 // We pass the previous N ModelInputs to the model, including the most recent ModelInput.
 constexpr uint32_t kNumHistoricalModelInputs = 3;
 
 // TODO(b/207662659): Add config for changing between different reader types.
-AdaptiveCpu::AdaptiveCpu(std::shared_ptr<HintManager> hintManager) : mHintManager(hintManager) {}
+AdaptiveCpu::AdaptiveCpu() {}
 
 bool AdaptiveCpu::IsEnabled() const {
     return mIsEnabled;
@@ -149,7 +152,6 @@ void AdaptiveCpu::RunMainLoop() {
 
         ModelInput modelInput;
         modelInput.previousThrottleDecision = previousThrottleDecision;
-        modelInput.device = mDevice;
 
         modelInput.workDurationFeatures = mWorkDurationProcessor.GetFeatures();
         LOG(VERBOSE) << "Got work durations: count=" << modelInput.workDurationFeatures.numDurations
@@ -175,14 +177,20 @@ void AdaptiveCpu::RunMainLoop() {
         LOG(VERBOSE) << "Model decision: " << static_cast<uint32_t>(throttleDecision);
         ATRACE_INT("AdaptiveCpu_throttleDecision", static_cast<uint32_t>(throttleDecision));
 
-        if (throttleDecision != previousThrottleDecision) {
+        const auto now = mTimeSource.GetTime();
+        // Resend the throttle hints, even if they've not changed, if the previous send is close to
+        // timing out. We define "close to" as half the hint timeout, as we can't guarantee we will
+        // run again before the actual timeout.
+        const bool throttleHintMayTimeout = now - mLastThrottleHintTime > mConfig.hintTimeout / 2;
+        if (throttleDecision != previousThrottleDecision || throttleHintMayTimeout) {
+            mLastThrottleHintTime = now;
             ATRACE_NAME("sendHints");
             for (const auto &hintName : THROTTLE_DECISION_TO_HINT_NAMES.at(throttleDecision)) {
-                mHintManager->DoHint(hintName, mConfig.hintTimeout);
+                HintManager::GetInstance()->DoHint(hintName, mConfig.hintTimeout);
             }
             for (const auto &hintName :
                  THROTTLE_DECISION_TO_HINT_NAMES.at(previousThrottleDecision)) {
-                mHintManager->EndHint(hintName);
+                HintManager::GetInstance()->EndHint(hintName);
             }
             previousThrottleDecision = throttleDecision;
         }
