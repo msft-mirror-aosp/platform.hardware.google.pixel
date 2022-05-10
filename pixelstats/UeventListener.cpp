@@ -68,11 +68,9 @@ using android::sp;
 using android::base::ReadFileToString;
 using android::base::WriteStringToFile;
 using android::hardware::google::pixel::WlcReporter;
-using android::hardware::google::pixel::PixelAtoms::ChargeStats;
 using android::hardware::google::pixel::PixelAtoms::PdVidPid;
 using android::hardware::google::pixel::PixelAtoms::VendorHardwareFailed;
 using android::hardware::google::pixel::PixelAtoms::VendorUsbPortOverheat;
-using android::hardware::google::pixel::PixelAtoms::VoltageTierStats;
 
 constexpr int32_t UEVENT_MSG_LEN = 2048;  // it's 2048 in all other users.
 constexpr int32_t PRODUCT_TYPE_OFFSET = 23;
@@ -82,6 +80,7 @@ constexpr int32_t VID_MASK = 0xffff;
 constexpr int32_t VID_GOOGLE = 0x18d1;
 constexpr int32_t PID_OFFSET = 2;
 constexpr int32_t PID_LENGTH = 4;
+constexpr uint32_t PID_P30 = 0x4f05;
 
 bool UeventListener::ReadFileToInt(const std::string &path, int *val) {
     return ReadFileToInt(path.c_str(), val);
@@ -177,179 +176,13 @@ void UeventListener::ReportUsbPortOverheatEvent(const std::shared_ptr<IStats> &s
     reportUsbPortOverheat(stats_client, overheat_info);
 }
 
-void UeventListener::ReportChargeStats(const std::shared_ptr<IStats> &stats_client,
-                                       const char *line, const char *wline_at,
-                                       const char *wline_ac) {
-    int charge_stats_fields[] = {ChargeStats::kAdapterTypeFieldNumber,
-                                 ChargeStats::kAdapterVoltageFieldNumber,
-                                 ChargeStats::kAdapterAmperageFieldNumber,
-                                 ChargeStats::kSsocInFieldNumber,
-                                 ChargeStats::kVoltageInFieldNumber,
-                                 ChargeStats::kSsocOutFieldNumber,
-                                 ChargeStats::kVoltageOutFieldNumber,
-                                 ChargeStats::kAdapterCapabilities0FieldNumber,
-                                 ChargeStats::kAdapterCapabilities1FieldNumber,
-                                 ChargeStats::kAdapterCapabilities2FieldNumber,
-                                 ChargeStats::kAdapterCapabilities3FieldNumber,
-                                 ChargeStats::kAdapterCapabilities4FieldNumber,
-                                 ChargeStats::kReceiverState0FieldNumber,
-                                 ChargeStats::kReceiverState1FieldNumber};
-    const int32_t chg_fields_size = std::size(charge_stats_fields);
-    static_assert(chg_fields_size == 14, "Unexpected charge stats fields size");
-    const int32_t wlc_fields_size = 7;
-    std::vector<VendorAtomValue> values(chg_fields_size);
-    VendorAtomValue val;
-    int32_t i = 0, tmp[chg_fields_size] = {0}, fields_size = (chg_fields_size - wlc_fields_size);
-
-    ALOGD("ChargeStats: processing %s", line);
-    if (sscanf(line, "%d,%d,%d, %d,%d,%d,%d", &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5],
-               &tmp[6]) != 7) {
-        ALOGE("Couldn't process %s", line);
-        return;
-    }
-
-    if (wline_at) {
-        int32_t ssoc_tmp = 0;
-        ALOGD("ChargeStats(wlc): processing %s", wline_at);
-        if (sscanf(wline_at, "A:%d", &ssoc_tmp) != 1) {
-            ALOGE("Couldn't process %s", wline_at);
-        } else {
-            tmp[0] = wireless_charge_stats_.TranslateSysModeToAtomValue(ssoc_tmp);
-            ALOGD("ChargeStats(wlc): processing %s", wline_ac);
-            if (sscanf(wline_ac, "D:%x,%x,%x,%x,%x, %x,%x", &tmp[7], &tmp[8], &tmp[9], &tmp[10],
-                       &tmp[11], &tmp[12], &tmp[13]) != 7)
-                ALOGE("Couldn't process %s", wline_ac);
-            else
-                fields_size = chg_fields_size; /* include wlc stats */
-        }
-    }
-
-    for (i = 0; i < fields_size; i++) {
-        val.set<VendorAtomValue::intValue>(tmp[i]);
-        values[charge_stats_fields[i] - kVendorAtomOffset] = val;
-    }
-
-    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
-                        .atomId = PixelAtoms::Atom::kChargeStats,
-                        .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report ChargeStats to Stats service");
-}
-
-void UeventListener::ReportVoltageTierStats(const std::shared_ptr<IStats> &stats_client,
-                                            const char *line, const bool has_wireless,
-                                            const std::string wfile_contents) {
-    int voltage_tier_stats_fields[] = {
-            VoltageTierStats::kVoltageTierFieldNumber,
-            VoltageTierStats::kSocInFieldNumber, /* retrieved via ssoc_tmp */
-            VoltageTierStats::kCcInFieldNumber,
-            VoltageTierStats::kTempInFieldNumber,
-            VoltageTierStats::kTimeFastSecsFieldNumber,
-            VoltageTierStats::kTimeTaperSecsFieldNumber,
-            VoltageTierStats::kTimeOtherSecsFieldNumber,
-            VoltageTierStats::kTempMinFieldNumber,
-            VoltageTierStats::kTempAvgFieldNumber,
-            VoltageTierStats::kTempMaxFieldNumber,
-            VoltageTierStats::kIbattMinFieldNumber,
-            VoltageTierStats::kIbattAvgFieldNumber,
-            VoltageTierStats::kIbattMaxFieldNumber,
-            VoltageTierStats::kIclMinFieldNumber,
-            VoltageTierStats::kIclAvgFieldNumber,
-            VoltageTierStats::kIclMaxFieldNumber,
-            VoltageTierStats::kMinAdapterPowerOutFieldNumber,
-            VoltageTierStats::kTimeAvgAdapterPowerOutFieldNumber,
-            VoltageTierStats::kMaxAdapterPowerOutFieldNumber,
-            VoltageTierStats::kChargingOperatingPointFieldNumber};
-
-    const int32_t vtier_fields_size = std::size(voltage_tier_stats_fields);
-    static_assert(vtier_fields_size == 20, "Unexpected voltage tier stats fields size");
-    const int32_t wlc_fields_size = 4;
-    std::vector<VendorAtomValue> values(vtier_fields_size);
-    VendorAtomValue val;
-    float ssoc_tmp;
-    int32_t i = 0, tmp[vtier_fields_size - 1] = {0}, /* ssoc_tmp is not saved in this array */
-            fields_size = (vtier_fields_size - wlc_fields_size);
-
-    if (sscanf(line, "%d, %f,%d,%d, %d,%d,%d, %d,%d,%d, %d,%d,%d, %d,%d,%d", &tmp[0], &ssoc_tmp,
-               &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5], &tmp[6], &tmp[7], &tmp[8], &tmp[9],
-               &tmp[10], &tmp[11], &tmp[12], &tmp[13], &tmp[14]) != 16) {
-        /* If format isn't as expected, then ignore line on purpose */
-        return;
-    }
-
-    if (has_wireless) {
-        wireless_charge_stats_.CalculateWirelessChargeStats(static_cast<int>(ssoc_tmp),
-                                                            wfile_contents);
-        tmp[15] = wireless_charge_stats_.pout_min_;
-        tmp[16] = wireless_charge_stats_.pout_avg_;
-        tmp[17] = wireless_charge_stats_.pout_max_;
-        tmp[18] = wireless_charge_stats_.of_freq_;
-        fields_size = vtier_fields_size; /* include wlc stats */
-    }
-
-    ALOGD("VoltageTierStats: processed %s", line);
-    val.set<VendorAtomValue::intValue>(tmp[0]);
-    values[voltage_tier_stats_fields[0] - kVendorAtomOffset] = val;
-    val.set<VendorAtomValue::floatValue>(ssoc_tmp);
-    values[voltage_tier_stats_fields[1] - kVendorAtomOffset] = val;
-    for (i = 2; i < fields_size; i++) {
-        val.set<VendorAtomValue::intValue>(tmp[i - 1]);
-        values[voltage_tier_stats_fields[i] - kVendorAtomOffset] = val;
-    }
-
-    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
-                        .atomId = PixelAtoms::Atom::kVoltageTierStats,
-                        .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report VoltageTierStats to Stats service");
-}
-
 void UeventListener::ReportChargeMetricsEvent(const std::shared_ptr<IStats> &stats_client,
                                               const char *driver) {
     if (!driver || strcmp(driver, "DRIVER=google,battery")) {
         return;
     }
 
-    std::string file_contents, line, wfile_contents;
-    std::istringstream ss;
-    bool has_wireless = wireless_charge_stats_.CheckWirelessContentsAndAck(&wfile_contents);
-
-    if (!ReadFileToString(kChargeMetricsPath.c_str(), &file_contents)) {
-        ALOGE("Unable to read %s - %s", kChargeMetricsPath.c_str(), strerror(errno));
-        return;
-    }
-
-    ss.str(file_contents);
-
-    if (!std::getline(ss, line)) {
-        ALOGE("Unable to read first line");
-        return;
-    }
-
-    if (!WriteStringToFile(std::to_string(0), kChargeMetricsPath.c_str())) {
-        ALOGE("Couldn't clear %s - %s", kChargeMetricsPath.c_str(), strerror(errno));
-    }
-
-    if (has_wireless) {
-        std::string wline_at, wline_ac;
-        std::istringstream wss;
-
-        /* there are two lines in the head, A: ...(Adapter Type) and D: ...(Adapter Capabilities) */
-        wss.str(wfile_contents);
-        std::getline(wss, wline_at);
-        std::getline(wss, wline_ac);
-        ReportChargeStats(stats_client, line.c_str(), wline_at.c_str(), wline_ac.c_str());
-        /* reset initial tier soc */
-        wireless_charge_stats_.tier_soc_ = 0;
-    } else {
-        ReportChargeStats(stats_client, line.c_str(), NULL, NULL);
-    }
-
-    while (std::getline(ss, line)) {
-        ReportVoltageTierStats(stats_client, line.c_str(), has_wireless, wfile_contents);
-    }
+    charge_stats_reporter_.checkAndReport(stats_client, kChargeMetricsPath);
 }
 
 /* ReportWlc
@@ -421,13 +254,15 @@ void UeventListener::ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_c
         return;
     }
 
-    // Upload data only for chargers
-    if (((vid >> PRODUCT_TYPE_OFFSET) & PRODUCT_TYPE_MASK) != PRODUCT_TYPE_CHARGER) {
+    // Upload data only for Google VID
+    if ((VID_MASK & vid) != VID_GOOGLE) {
         return;
     }
 
-    // Upload data only for Google VID
-    if ((VID_MASK & vid) != VID_GOOGLE) {
+    // Upload data only for chargers unless for P30 PID where the product type
+    // isn't set to charger.
+    if ((((vid >> PRODUCT_TYPE_OFFSET) & PRODUCT_TYPE_MASK) != PRODUCT_TYPE_CHARGER) &&
+        (pid != PID_P30)) {
         return;
     }
 
@@ -440,7 +275,7 @@ void UeventListener::ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_c
     values[PdVidPid::kPidFieldNumber - kVendorAtomOffset] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
+    VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kPdVidPid,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -513,7 +348,7 @@ bool UeventListener::ProcessUevent() {
             devpath = cp;
         } else if (!strncmp(cp, "SUBSYSTEM=", strlen("SUBSYSTEM="))) {
             subsystem = cp;
-        } else if (!strncmp(cp, "DEVTYPE=typec_partner", strlen("DEVTYPE=typec_partner"))) {
+        } else if (!strncmp(cp, kTypeCPartnerUevent.c_str(), kTypeCPartnerUevent.size())) {
             collect_partner_id = true;
         } else if (!strncmp(cp, "POWER_SUPPLY_NAME=wireless",
                             strlen("POWER_SUPPLY_NAME=wireless"))) {
@@ -561,6 +396,7 @@ UeventListener::UeventListener(const std::string audio_uevent, const std::string
       kBatterySSOCPath(ssoc_details_path),
       kUsbPortOverheatPath(overheat_path),
       kChargeMetricsPath(charge_metrics_path),
+      kTypeCPartnerUevent(typec_partner_uevent_default),
       kTypeCPartnerVidPath(typec_partner_vid_path),
       kTypeCPartnerPidPath(typec_partner_pid_path),
       kWirelessChargerPtmcUevent(""),
@@ -577,6 +413,9 @@ UeventListener::UeventListener(const struct UeventPaths &uevents_paths)
       kChargeMetricsPath((uevents_paths.ChargeMetricsPath == nullptr)
                                  ? charge_metrics_path_default
                                  : uevents_paths.ChargeMetricsPath),
+      kTypeCPartnerUevent((uevents_paths.TypeCPartnerUevent == nullptr)
+                                  ? typec_partner_uevent_default
+                                  : uevents_paths.TypeCPartnerUevent),
       kTypeCPartnerVidPath((uevents_paths.TypeCPartnerVidPath == nullptr)
                                    ? typec_partner_vid_path_default
                                    : uevents_paths.TypeCPartnerVidPath),

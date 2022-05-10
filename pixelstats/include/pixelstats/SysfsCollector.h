@@ -20,6 +20,7 @@
 #include <aidl/android/frameworks/stats/IStats.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 #include "BatteryEEPROMReporter.h"
+#include "MitigationStatsReporter.h"
 #include "MmMetricsReporter.h"
 
 namespace android {
@@ -47,12 +48,16 @@ class SysfsCollector {
         const char *const UFSLifetimeA;
         const char *const UFSLifetimeB;
         const char *const UFSLifetimeC;
-        const char *const UFSHostResetPath;
         const char *const F2fsStatsPath;
         const char *const UserdataBlockProp;
         const char *const ZramMmStatPath;
         const char *const ZramBdStatPath;
         const char *const EEPROMPath;
+        const char *const MitigationPath;
+        const char *const SpeakerTemperaturePath;
+        const char *const SpeakerExcursionPath;
+        const char *const SpeakerHeartBeatPath;
+        const std::vector<std::string> UFSErrStatsPath;
     };
 
     SysfsCollector(const struct SysfsPaths &paths);
@@ -75,14 +80,17 @@ class SysfsCollector {
     void logUFSErrorStats(const std::shared_ptr<IStats> &stats_client);
     void logF2fsStats(const std::shared_ptr<IStats> &stats_client);
     void logF2fsCompressionInfo(const std::shared_ptr<IStats> &stats_client);
+    void logF2fsGcSegmentInfo(const std::shared_ptr<IStats> &stats_client);
     void logZramStats(const std::shared_ptr<IStats> &stats_client);
     void logBootStats(const std::shared_ptr<IStats> &stats_client);
     void logBatteryEEPROM(const std::shared_ptr<IStats> &stats_client);
+    void logSpeakerHealthStats(const std::shared_ptr<IStats> &stats_client);
 
     void reportSlowIoFromFile(const std::shared_ptr<IStats> &stats_client, const char *path,
                               const VendorSlowIo::IoOperation &operation_s);
     void reportZramMmStat(const std::shared_ptr<IStats> &stats_client);
     void reportZramBdStat(const std::shared_ptr<IStats> &stats_client);
+    int getReclaimedSegments(const std::string &mode);
 
     const char *const kSlowioReadCntPath;
     const char *const kSlowioWriteCntPath;
@@ -98,14 +106,19 @@ class SysfsCollector {
     const char *const kUFSLifetimeA;
     const char *const kUFSLifetimeB;
     const char *const kUFSLifetimeC;
-    const char *const kUFSHostResetPath;
     const char *const kF2fsStatsPath;
     const char *const kZramMmStatPath;
     const char *const kZramBdStatPath;
     const char *const kEEPROMPath;
+    const char *const kPowerMitigationStatsPath;
+    const char *const kSpeakerTemperaturePath;
+    const char *const kSpeakerExcursionPath;
+    const char *const kSpeakerHeartbeatPath;
+    const std::vector<std::string> kUFSErrStatsPath;
 
     BatteryEEPROMReporter battery_EEPROM_reporter_;
     MmMetricsReporter mm_metrics_reporter_;
+    MitigationStatsReporter mitigation_stats_reporter_;
 
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number
