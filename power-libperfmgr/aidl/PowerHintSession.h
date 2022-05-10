@@ -24,6 +24,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "adaptivecpu/AdaptiveCpu.h"
+
 namespace aidl {
 namespace google {
 namespace hardware {
@@ -49,28 +51,35 @@ struct AppHintDesc {
           threadIds(std::move(threadIds)),
           duration(0LL),
           current_min(0),
+          transitioanl_min(0),
           is_active(true),
           update_count(0),
           integral_error(0),
-          previous_error(0) {}
+          previous_error(0),
+          work_period(0),
+          last_start(0) {}
     std::string toString() const;
     const int32_t tgid;
     const int32_t uid;
     const std::vector<int> threadIds;
     nanoseconds duration;
     int current_min;
+    int transitioanl_min;
     // status
     std::atomic<bool> is_active;
     // pid
     uint64_t update_count;
     int64_t integral_error;
     int64_t previous_error;
+    // earlyhint pace
+    int64_t work_period;
+    int64_t last_start;
 };
 
 class PowerHintSession : public BnPowerHintSession {
   public:
-    explicit PowerHintSession(int32_t tgid, int32_t uid, const std::vector<int32_t> &threadIds,
-                              int64_t durationNanos, nanoseconds adpfRate);
+    explicit PowerHintSession(std::shared_ptr<AdaptiveCpu> adaptiveCpu, int32_t tgid, int32_t uid,
+                              const std::vector<int32_t> &threadIds, int64_t durationNanos);
     ~PowerHintSession();
     ndk::ScopedAStatus close() override;
     ndk::ScopedAStatus pause() override;
@@ -80,34 +89,54 @@ class PowerHintSession : public BnPowerHintSession {
             const std::vector<WorkDuration> &actualDurations) override;
     bool isActive();
     bool isStale();
+    // Is this hint session for a user application
+    bool isAppSession();
     const std::vector<int> &getTidList() const;
+    int restoreUclamp();
 
   private:
-    class StaleHandler : public MessageHandler {
+    class HintTimerHandler : public MessageHandler {
       public:
-        StaleHandler(PowerHintSession *session)
-            : mSession(session), mIsMonitoringStale(false), mLastUpdatedTime(steady_clock::now()) {}
+        enum HintTimerState {
+            STALE,
+            MONITORING,
+            EARLY_BOOST,
+        };
+        HintTimerHandler(PowerHintSession *session)
+            : mSession(session),
+              mState(STALE),
+              mLastUpdatedTime(steady_clock::now()),
+              mIsSessionDead(false) {}
+        ~HintTimerHandler();
         void handleMessage(const Message &message) override;
-        void updateStaleTimer();
+        // Update HintTimer by actual work duration.
+        void updateHintTimer(int64_t actualDurationNs);
+        // Update HintTimer by a list of work durations which could be used for
+        // calculating the work period.
+        void updateHintTimer(const std::vector<WorkDuration> &actualDurations);
+        time_point<steady_clock> getEarlyBoostTime();
         time_point<steady_clock> getStaleTime();
+        void setSessionDead();
 
       private:
         PowerHintSession *mSession;
-        std::atomic<bool> mIsMonitoringStale;
+        HintTimerState mState;
         std::atomic<time_point<steady_clock>> mLastUpdatedTime;
+        std::atomic<time_point<steady_clock>> mNextStartTime;
         std::mutex mStaleLock;
+        bool mIsSessionDead;
     };
 
   private:
     void setStale();
     void updateUniveralBoostMode();
-    int setUclamp(int32_t min, int32_t max = kMaxUclampValue);
+    int setUclamp(int32_t min, bool update = true);
     std::string getIdString() const;
+    const std::shared_ptr<AdaptiveCpu> mAdaptiveCpu;
     AppHintDesc *mDescriptor = nullptr;
-    sp<StaleHandler> mStaleHandler;
+    sp<HintTimerHandler> mHintTimerHandler;
     sp<MessageHandler> mPowerManagerHandler;
     std::mutex mLock;
-    const nanoseconds kAdpfRate;
     std::atomic<bool> mSessionClosed = false;
 };
 
