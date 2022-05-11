@@ -1,5 +1,7 @@
 PRODUCT_COPY_FILES += \
-      hardware/google/pixel/mm/pixel-mm-gki.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/pixel-mm-gki.rc
+      hardware/google/pixel/mm/pixel-mm-gki.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/pixel-mm-gki.rc \
+      hardware/google/pixel/mm/fstab.zram.2g:$(TARGET_COPY_OUT_VENDOR)/etc/fstab.zram.2g \
+      hardware/google/pixel/mm/fstab.zram.3g:$(TARGET_COPY_OUT_VENDOR)/etc/fstab.zram.3g
 
 ifneq (,$(filter userdebug eng, $(TARGET_BUILD_VARIANT)))
 PRODUCT_PACKAGES += \
@@ -14,6 +16,8 @@ PRODUCT_PROPERTY_OVERRIDES += \
 
 # LMK tuning
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.lmk.filecache_min_kb=153600
+    ro.lmk.filecache_min_kb=153600 \
+    ro.lmk.kill_timeout_ms=50 \
+    ro.lmk.stall_limit_critical=40
 
 BOARD_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/mm/gki
