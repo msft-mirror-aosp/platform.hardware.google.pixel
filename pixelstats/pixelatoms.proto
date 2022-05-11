@@ -31,7 +31,7 @@ option java_outer_classname = "PixelAtoms";
  *   - field # 1 - this will be occupied by the vendor namespace
  */
 
-/* Allocated Westworld atom IDs. */
+/* Allocated atom IDs. */
 message Atom {
     oneof pushed {
       // AOSP atom ID range starts at 105000
@@ -63,14 +63,24 @@ message Atom {
       CmaStatusExt cma_status_ext = 105025;
       VendorBatteryHealthSnapshot vendor_battery_health_snapshot = 105026; // moved from atoms.proto
       VendorBatteryCausedShutdown vendor_battery_caused_shutdown = 105027; // moved from atoms.proto
+      F2fsGcSegmentInfo f2fs_gc_segment_info = 105028;
+      PowerMitigationStats mitigation_stats = 105029; // moved from atoms.proto
 
       CitadelVersion citadel_version = 100018; // moved from vendor proprietary
       CitadelEvent citadel_event = 100019;  // moved from vendor proprietary
+      VendorSpeakerStatsReported vendor_speaker_stats_reported = 105030;
+
+      ChreHalNanoappLoadFailed chre_hal_nanoapp_load_failed = 105031;
+      ChrePalOpenFailed chre_pal_open_failed = 105032;
+      ChreApiErrorCodeDistributionTaken chre_api_error_code_distribution_taken = 105033;
+      ChreDynamicMemorySnapshotReported chre_dynamic_memory_snapshot_reported = 105034;
+      ChreEventQueueSnapshotReported chre_event_queue_snapshot_reported = 105035;
+      ChreApWakeUpOccurred chre_ap_wake_up_occurred = 105036;
     }
     // AOSP atom ID range ends at 109999
 }
 
-/* Westworld-supported reverse domain names. */
+/* Supported reverse domain names. */
 message ReverseDomainNames {
     optional string pixel = 1 [default = "com.google.pixel"];
 }
@@ -148,6 +158,9 @@ message ChargeStats {
      */
     optional int32 receiver_state0 = 14;
     optional int32 receiver_state1 = 15;
+
+    /* AACR feature to record capacity */
+    optional int32 charge_capacity = 16;
 }
 
 /* A message containing stats from each charge voltage tier. */
@@ -384,6 +397,16 @@ message BatteryEEPROM {
     optional int32 min_ibatt = 19;
     /* Field used to verify the integrity of the EEPROM data */
     optional int32 checksum = 20;
+
+    /* Extend data for P21 */
+    /* Temperature compensation information */
+    optional int32 tempco = 21;
+    /* Learned characterization related to the voltage gauge */
+    optional int32 rcomp0 = 22;
+    /* For time to monitor the life of cell */
+    optional int32 timer_h = 23;
+    /* The full capacity of the battery learning at the end of every charge cycle */
+    optional int32 full_rep = 24;
 }
 
 /* A message containing an exceptional event from citadel. */
@@ -451,6 +474,25 @@ message CitadelVersion {
     optional int32 impedance = 3;
 }
 
+/**
+ * Logs the reported vendor speaker health stats.
+ * Logged from: hardware/google/pixel/pixelstats/SysfsCollector.cpp
+ */
+message VendorSpeakerStatsReported {
+  /* Vendor reverse domain name (expecting "com.google.pixel") */
+  optional string reverse_domain_name = 1;
+  /* The location of speaker; 0 = left , 1 = right */
+  optional int32 speaker_location = 2;
+  /* The speaker's impedance value (milliOhm) */
+  optional int32 impedance = 3;
+  /* The speaker's maximum temperature (milliDegree C) */
+  optional int32 max_temperature = 4;
+  /* The speaker's execursion length (micrometer) */
+  optional int32 excursion = 5;
+  /* The speaker's heart beat count */
+  optional int32 heartbeat = 6;
+}
+
 /* A message containing how many times of ufs host reset */
 message StorageUfsResetCount {
     optional string reverse_domain_name = 1;
@@ -506,6 +548,7 @@ message CmaStatus {
   optional int64 cma_fail_pages = 5;
   optional int64 cma_fail_soft_pages = 6;
   optional int64 migrated_pages = 7;
+  optional string cma_heap_name = 8;
 }
 
 /* A message containing CMA metrics (External). */
@@ -515,6 +558,7 @@ message CmaStatusExt {
   optional int64 cma_alloc_latency_low = 3;
   optional int64 cma_alloc_latency_mid = 4;
   optional int64 cma_alloc_latency_high = 5;
+  optional string cma_heap_name = 6;
 }
 
 message F2fsCompressionInfo {
@@ -698,4 +742,281 @@ message VendorBatteryCausedShutdown {
  optional string reverse_domain_name = 1;
  // The last recorded battery voltage prior to shutdown.
  optional int32 last_recorded_micro_volt = 2;
+}
+
+/**
+ * Log mitigation statistics.
+ */
+message PowerMitigationStats {
+ optional string reverse_domain_name = 1;
+ // The last triggered count: batoilo.
+ optional int32 batoilo_count = 2;
+ // The last triggered count: vdroop1.
+ optional int32 vdroop1_count = 3;
+ // The last triggered count: vdroop2.
+ optional int32 vdroop2_count = 4;
+ // The last triggered count: smpl_warn.
+ optional int32 smpl_warn_count = 5;
+ // The last triggered count: ocp_cpu1.
+ optional int32 ocp_cpu1_count = 6;
+ // The last triggered count: ocp_cpu2.
+ optional int32 ocp_cpu2_count = 7;
+ // The last triggered count: ocp_gpu.
+ optional int32 ocp_gpu_count = 8;
+ // The last triggered count: ocp_tpu.
+ optional int32 ocp_tpu_count = 9;
+ // The last triggered count: soft_ocp_cpu1.
+ optional int32 soft_ocp_cpu1_count = 10;
+ // The last triggered count: soft_ocp_cpu2.
+ optional int32 soft_ocp_cpu2_count = 11;
+ // The last triggered count: soft_ocp_gpu.
+ optional int32 soft_ocp_gpu_count = 12;
+ // The last triggered count: soft_ocp_tpu.
+ optional int32 soft_ocp_tpu_count = 13;
+ // The last triggered capacity: batoilo.
+ optional int32 batoilo_cap = 14;
+ // The last triggered capacity: vdroop1.
+ optional int32 vdroop1_cap = 15;
+ // The last triggered capacity: vdroop2.
+ optional int32 vdroop2_cap = 16;
+ // The last triggered capacity: smpl_warn.
+ optional int32 smpl_warn_cap = 17;
+ // The last triggered capacity: ocp_cpu1.
+ optional int32 ocp_cpu1_cap = 18;
+ // The last triggered capacity: ocp_cpu2.
+ optional int32 ocp_cpu2_cap = 19;
+ // The last triggered capacity: ocp_gpu.
+ optional int32 ocp_gpu_cap = 20;
+ // The last triggered capacity: ocp_tpu.
+ optional int32 ocp_tpu_cap = 21;
+ // The last triggered capacity: soft_ocp_cpu1.
+ optional int32 soft_ocp_cpu1_cap = 22;
+ // The last triggered capacity: soft_ocp_cpu2.
+ optional int32 soft_ocp_cpu2_cap = 23;
+ // The last triggered capacity: soft_ocp_gpu.
+ optional int32 soft_ocp_gpu_cap = 24;
+ // The last triggered capacity: soft_ocp_tpu.
+ optional int32 soft_ocp_tpu_cap = 25;
+}
+
+/**
+ * Log how many segments have been reclaimed in a specific GC mode.
+ */
+message F2fsGcSegmentInfo {
+    optional string reverse_domain_name = 1;
+    /* Reclaimed segments in GC normal mode */
+    optional int32 reclaimed_segments_normal = 2;
+    /* Reclaimed segments in GC urgent high mode */
+    optional int32 reclaimed_segments_urgent_high = 3;
+    /* Reclaimed segments in GC urgent low mode */
+    optional int32 reclaimed_segments_urgent_low = 4;
+}
+
+/**
+ * Logs an event indicating that a nanoapp loading has failed at the HAL.
+ */
+message ChreHalNanoappLoadFailed {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  enum Type {
+    TYPE_UNKNOWN = 0;
+    // Corresponds to preloaded nanoapps on the device.
+    TYPE_PRELOADED = 1;
+    // Dynamic loading of a nanoapp (e.g. code download).
+    TYPE_DYNAMIC = 2;
+  }
+
+  enum Reason {
+    REASON_UNKNOWN = 0;
+    // A generic error code that does not match any of the others.
+    REASON_ERROR_GENERIC = 1;
+    // Failure at the connection between HAL<->CHRE.
+    REASON_CONNECTION_ERROR = 2;
+    // System ran out of memory.
+    REASON_OOM = 3;
+    // Nanoapp did not have the right signing for loading.
+    REASON_SIGNATURE_MISMATCH = 4;
+  }
+
+  // The 64-bit unique nanoapp identifier of the nanoapp that failed.
+  optional int64 nanoapp_id = 2;
+
+  // The type of the load event.
+  optional Type type = 3;
+
+  // The reason for the failure.
+  optional Reason reason = 4;
+}
+
+/**
+ * An enum describing a module within CHRE.
+ */
+enum ChreModuleType {
+  CHRE_MODULE_TYPE_UNKNOWN = 0;
+  CHRE_MODULE_TYPE_CHRE = 1; // Core CHRE framework
+  CHRE_MODULE_TYPE_PAL = 2; // PAL module (could be CHPP)
+  CHRE_MODULE_TYPE_NANOAPP = 3;
+}
+
+/**
+ * An enum describing the CHRE PAL type.
+ */
+enum ChrePalType {
+  CHRE_PAL_TYPE_UNKNOWN = 0;
+  CHRE_PAL_TYPE_SENSOR = 1;
+  CHRE_PAL_TYPE_WIFI = 2;
+  CHRE_PAL_TYPE_GNSS = 3;
+  CHRE_PAL_TYPE_WWAN = 4;
+  CHRE_PAL_TYPE_AUDIO = 5;
+  CHRE_PAL_TYPE_BLE = 6;
+}
+
+/**
+ * Logs an event indicating that a CHRE PAL open has failed.
+ */
+message ChrePalOpenFailed {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  enum Type {
+    TYPE_UNKNOWN = 0;
+    // Initial open when CHRE starts.
+    INITIAL_OPEN = 1;
+    // Any form of "reopen" event internally in the PAL.
+    REOPEN = 2;
+  }
+
+  // The PAL this failure event is for.
+  optional ChrePalType pal = 2;
+
+  // The type of failure observed.
+  optional Type type = 3;
+}
+
+/**
+ * The type of CHRE API request.
+ */
+enum ChreApiType {
+  CHRE_API_TYPE_UNKNOWN = 0;
+  CHRE_API_TYPE_WIFI_SCAN_MONITOR = 1;
+  CHRE_API_TYPE_WIFI_ACTIVE_SCAN = 2;
+  CHRE_API_TYPE_WIFI_RTT_RANGING = 3;
+}
+
+/**
+ * The type of CHRE API error.
+ */
+enum ChreError {
+  CHRE_ERROR_UNKNOWN = 0;
+
+  // No error occurred.
+  CHRE_ERROR_NONE = 1;
+
+  // An unspecified failure occurred.
+  CHRE_ERROR = 2;
+
+  // One or more supplied arguments are invalid.
+  CHRE_ERROR_INVALID_ARGUMENT = 3;
+
+  // Unable to satisfy request because the system is busy.
+  CHRE_ERROR_BUSY = 4;
+
+  // Unable to allocate memory.
+  CHRE_ERROR_NO_MEMORY = 5;
+
+  // The requested feature is not supported.
+  CHRE_ERROR_NOT_SUPPORTED = 6;
+
+  // A timeout occurred while processing the request.
+  CHRE_ERROR_TIMEOUT = 7;
+
+  // The relevant capability is disabled, for example due to a user
+  // configuration that takes precedence over this request.
+  CHRE_ERROR_FUNCTION_DISABLED = 8;
+}
+
+/**
+ * Distribution of CHRE API error codes.
+ */
+message ChreApiErrorCodeDistributionTaken {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The chreGetTime() value when this snapshot was taken, in milliseconds.
+  optional int32 snapshot_chre_get_time_ms = 2;
+
+  // The CHRE API type.
+  optional ChreApiType api_type = 3;
+
+  // Corresponds to the CHRE error code that occurred, as defined in the
+  // "enum chreError" field in chre_api/chre/common.h.
+  optional ChreError error_code = 4;
+  optional int32 num_errors = 5;
+}
+
+/**
+ * Snapshot of the dynamic memory allocated in CHRE.
+ */
+message ChreDynamicMemorySnapshotReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The chreGetTime() value when this snapshot was taken, in milliseconds.
+  optional int32 snapshot_chre_get_time_ms = 2;
+
+  // The type of the module.
+  optional ChreModuleType module_type = 3;
+
+  // The unique 64-bit ID for a nanoapp, only used if the module_type is NANOAPP.
+  // If module_type is PAL, then it represents the ChrePalType enum. If the module_type
+  // is CHRE, then a zero value should be used.
+  optional int64 pal_type_or_nanoapp_id = 4;
+
+  // The max allocation amount of this module in bytes.
+  optional int32 max_allocation_bytes = 5;
+
+  // The current allocation amount of this module in bytes.
+  optional int32 current_allocation_bytes = 6;
+}
+
+/**
+ * Snapshot of the event queue stats in CHRE.
+ */
+message ChreEventQueueSnapshotReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The chreGetTime() value when this snapshot was taken, in milliseconds.
+  optional int32 snapshot_chre_get_time_ms = 2;
+
+  // The maximum size the event queue got to (i.e. num pending events).
+  optional int32 max_event_queue_size = 3;
+
+  // The average size the event queue got to (i.e. num pending events).
+  optional int32 mean_event_queue_size = 4;
+
+  // The number of events that were dropped due to capacity limits.
+  optional int32 num_dropped_events = 5;
+
+  // The maximum amount of time it took for an event, from when it was received,
+  // to when it was delivered to all interested modules. This value represents
+  // the total delay within the CHRE subsystem.
+  optional int64 max_queue_delay_us = 6;
+
+  // The mean value of the delay in microseconds.
+  optional int64 mean_queue_delay_us = 7;
+}
+
+/**
+ * Indicates that a nanoapp has woken up the AP.
+ */
+message ChreApWakeUpOccurred {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The 64-bit unique nanoapp identifier that describes the entity that has caused an AP wake-up
+  // from CHRE. Whenever this event occurs, this means that the nanoapp sent a message to
+  // the AP causing a transition between suspend/wake-up.
+  optional int64 nanoapp_id = 2;
 }

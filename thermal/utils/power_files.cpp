@@ -1,3 +1,4 @@
+
 /*
  * Copyright (C) 2021 The Android Open Source Project
  *
@@ -13,14 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <dirent.h>
+
+#define ATRACE_TAG (ATRACE_TAG_THERMAL | ATRACE_TAG_HAL)
+
+#include "power_files.h"
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
-
-#include "power_files.h"
+#include <dirent.h>
+#include <utils/Trace.h>
 
 namespace android {
 namespace hardware {
@@ -35,66 +39,80 @@ constexpr std::string_view kEnergyValueNode("energy_value");
 using android::base::ReadFileToString;
 using android::base::StringPrintf;
 
-void PowerFiles::setPowerDataToDefault(std::string_view sensor_name) {
-    std::unique_lock<std::shared_mutex> _lock(throttling_release_map_mutex_);
-    if (!throttling_release_map_.count(sensor_name.data())) {
-        return;
+bool PowerFiles::registerPowerRailsToWatch(std::string_view config_path) {
+    if (!ParsePowerRailInfo(config_path, &power_rail_info_map_)) {
+        LOG(ERROR) << "Failed to parse power rail info config";
+        return false;
     }
 
-    auto &cdev_release_map = throttling_release_map_.at(sensor_name.data());
-    PowerSample power_sample = {};
-
-    for (auto &cdev_release_pair : cdev_release_map) {
-        auto power_history_size = cdev_release_pair.second.power_history.size();
-        for (size_t i = 0; i < power_history_size; ++i) {
-            cdev_release_pair.second.power_history.pop();
-            cdev_release_pair.second.power_history.emplace(power_sample);
-        }
-        cdev_release_pair.second.release_step = 0;
-    }
-}
-
-unsigned int PowerFiles::getReleaseStep(std::string_view sensor_name, std::string_view power_rail) {
-    unsigned int release_step = 0;
-    std::shared_lock<std::shared_mutex> _lock(throttling_release_map_mutex_);
-
-    if (throttling_release_map_.count(sensor_name.data()) &&
-        throttling_release_map_[sensor_name.data()].count(power_rail.data())) {
-        release_step = throttling_release_map_[sensor_name.data()][power_rail.data()].release_step;
+    if (!power_rail_info_map_.size()) {
+        LOG(INFO) << " No power rail info config found";
+        return true;
     }
 
-    return release_step;
-}
-
-bool PowerFiles::registerPowerRailsToWatch(std::string_view sensor_name,
-                                           std::string_view power_rail,
-                                           const BindedCdevInfo &binded_cdev_info,
-                                           const CdevInfo &cdev_info) {
-    std::queue<PowerSample> power_history;
-    PowerSample power_sample = {
-            .energy_counter = 0,
-            .duration = 0,
-    };
+    if (!findEnergySourceToWatch()) {
+        LOG(ERROR) << "Cannot find energy source";
+        return false;
+    }
 
     if (!energy_info_map_.size() && !updateEnergyValues()) {
         LOG(ERROR) << "Faield to update energy info";
         return false;
     }
 
-    if (energy_info_map_.count(power_rail.data())) {
-        for (int i = 0; i < binded_cdev_info.power_sample_count; i++) {
-            power_history.emplace(power_sample);
+    for (const auto &power_rail_info_pair : power_rail_info_map_) {
+        std::vector<std::queue<PowerSample>> power_history;
+        if (!power_rail_info_pair.second.power_sample_count ||
+            power_rail_info_pair.second.power_sample_delay == std::chrono::milliseconds::max()) {
+            continue;
         }
-        throttling_release_map_[sensor_name.data()][power_rail.data()] = {
-                .power_history = power_history,
-                .release_step = 0,
-                .max_release_step = cdev_info.max_state,
-                .time_remaining = binded_cdev_info.power_sample_delay,
-        };
-    } else {
-        return false;
-    }
 
+        PowerSample power_sample = {
+                .energy_counter = 0,
+                .duration = 0,
+        };
+
+        if (power_rail_info_pair.second.virtual_power_rail_info != nullptr &&
+            power_rail_info_pair.second.virtual_power_rail_info->linked_power_rails.size()) {
+            for (size_t i = 0;
+                 i < power_rail_info_pair.second.virtual_power_rail_info->linked_power_rails.size();
+                 ++i) {
+                if (!energy_info_map_.count(power_rail_info_pair.second.virtual_power_rail_info
+                                                    ->linked_power_rails[i])) {
+                    LOG(ERROR) << " Could not find energy source "
+                               << power_rail_info_pair.second.virtual_power_rail_info
+                                          ->linked_power_rails[i];
+                    return false;
+                }
+                power_history.emplace_back(std::queue<PowerSample>());
+                for (int j = 0; j < power_rail_info_pair.second.power_sample_count; j++) {
+                    power_history[i].emplace(power_sample);
+                }
+            }
+        } else {
+            if (energy_info_map_.count(power_rail_info_pair.first)) {
+                power_history.emplace_back(std::queue<PowerSample>());
+                for (int j = 0; j < power_rail_info_pair.second.power_sample_count; j++) {
+                    power_history[0].emplace(power_sample);
+                }
+            } else {
+                LOG(ERROR) << "Could not find energy source " << power_rail_info_pair.first;
+                return false;
+            }
+        }
+
+        if (power_history.size()) {
+            power_status_map_[power_rail_info_pair.first] = {
+                    .power_history = power_history,
+                    .last_update_time = boot_clock::time_point::min(),
+                    .last_updated_avg_power = NAN,
+            };
+        } else {
+            LOG(ERROR) << "power history size is zero";
+            return false;
+        }
+        LOG(INFO) << "Successfully to register power rail " << power_rail_info_pair.first;
+    }
     return true;
 }
 
@@ -134,15 +152,12 @@ bool PowerFiles::findEnergySourceToWatch(void) {
     return true;
 }
 
-void PowerFiles::clearEnergyInfoMap(void) {
-    energy_info_map_.clear();
-}
-
 bool PowerFiles::updateEnergyValues(void) {
     std::string deviceEnergyContent;
     std::string deviceEnergyContents;
     std::string line;
 
+    ATRACE_CALL();
     for (const auto &path : energy_path_set_) {
         if (!android::base::ReadFileToString(path, &deviceEnergyContent)) {
             LOG(ERROR) << "Failed to read energy content from " << path;
@@ -154,7 +169,6 @@ bool PowerFiles::updateEnergyValues(void) {
 
     std::istringstream energyData(deviceEnergyContents);
 
-    clearEnergyInfoMap();
     while (std::getline(energyData, line)) {
         /* Read rail energy */
         uint64_t energy_counter = 0;
@@ -195,91 +209,130 @@ bool PowerFiles::updateEnergyValues(void) {
     return true;
 }
 
-void PowerFiles::throttlingReleaseUpdate(std::string_view sensor_name,
-                                         const ThrottlingSeverity severity,
-                                         const std::chrono::milliseconds time_elapsed_ms,
-                                         const BindedCdevInfo &binded_cdev_info,
-                                         std::string_view power_rail) {
-    std::unique_lock<std::shared_mutex> _lock(throttling_release_map_mutex_);
-    if (!throttling_release_map_.count(sensor_name.data()) ||
-        !throttling_release_map_[sensor_name.data()].count(power_rail.data())) {
-        return;
+float PowerFiles::updateAveragePower(std::string_view power_rail,
+                                     std::queue<PowerSample> *power_history) {
+    float avg_power = NAN;
+
+    if (!energy_info_map_.count(power_rail.data())) {
+        LOG(ERROR) << " Could not find power rail " << power_rail.data();
+        return avg_power;
+    }
+    const auto last_sample = power_history->front();
+    const auto curr_sample = energy_info_map_.at(power_rail.data());
+    const auto duration = curr_sample.duration - last_sample.duration;
+    const auto deltaEnergy = curr_sample.energy_counter - last_sample.energy_counter;
+
+    if (!last_sample.duration) {
+        LOG(VERBOSE) << "Power rail " << power_rail.data()
+                     << ": all power samples have not been collected yet";
+    } else if (duration <= 0 || deltaEnergy < 0) {
+        LOG(ERROR) << "Power rail " << power_rail.data() << " is invalid: duration = " << duration
+                   << ", deltaEnergy = " << deltaEnergy;
+
+        return avg_power;
+    } else {
+        avg_power = static_cast<float>(deltaEnergy) / static_cast<float>(duration);
+        LOG(VERBOSE) << "Power rail " << power_rail.data() << ", avg power = " << avg_power
+                     << ", duration = " << duration << ", deltaEnergy = " << deltaEnergy;
     }
 
-    auto &cdev_release_status = throttling_release_map_[sensor_name.data()].at(power_rail.data());
+    power_history->pop();
+    power_history->push(curr_sample);
 
-    if (time_elapsed_ms > cdev_release_status.time_remaining) {
-        cdev_release_status.time_remaining = binded_cdev_info.power_sample_delay;
-    } else {
-        cdev_release_status.time_remaining = cdev_release_status.time_remaining - time_elapsed_ms;
-        LOG(VERBOSE) << "Power rail " << power_rail
-                     << " : timeout remaining = " << cdev_release_status.time_remaining.count();
-        return;
+    return avg_power;
+}
+
+float PowerFiles::updatePowerRail(std::string_view power_rail) {
+    float avg_power = NAN;
+
+    if (!power_rail_info_map_.count(power_rail.data())) {
+        return avg_power;
+    }
+
+    if (!power_status_map_.count(power_rail.data())) {
+        return avg_power;
+    }
+
+    const auto &power_rail_info = power_rail_info_map_.at(power_rail.data());
+    auto &power_status = power_status_map_.at(power_rail.data());
+
+    boot_clock::time_point now = boot_clock::now();
+    auto time_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - power_status.last_update_time);
+
+    if (power_status.last_update_time != boot_clock::time_point::min() &&
+        time_elapsed_ms < power_rail_info.power_sample_delay) {
+        return power_status.last_updated_avg_power;
     }
 
     if (!energy_info_map_.size() && !updateEnergyValues()) {
         LOG(ERROR) << "Failed to update energy values";
-        cdev_release_status.release_step = 0;
-        return;
+        return avg_power;
     }
 
-    // Cannot find the power energy value, so we do not release the throttling
-    if (!energy_info_map_.count(power_rail.data())) {
-        LOG(ERROR) << "Cannot find the power energy value";
-        cdev_release_status.release_step = 0;
-        return;
-    }
-
-    const auto last_sample = cdev_release_status.power_history.front();
-    const auto curr_sample = energy_info_map_.at(power_rail.data());
-
-    const auto duration = curr_sample.duration - last_sample.duration;
-    const auto deltaEnergy = curr_sample.energy_counter - last_sample.energy_counter;
-    const auto avg_power = deltaEnergy / duration;
-
-    cdev_release_status.power_history.pop();
-    cdev_release_status.power_history.push(curr_sample);
-
-    bool is_over_budget = true;
-    if (!last_sample.duration) {
-        LOG(VERBOSE) << "Power rail " << power_rail.data() << ": the last energy timestamp is zero";
-    } else if (duration <= 0 || deltaEnergy < 0) {
-        LOG(ERROR) << "Power rail " << power_rail.data() << " is invalid: duration = " << duration
-                   << ", deltaEnergy = " << deltaEnergy;
+    if (power_rail_info.virtual_power_rail_info == nullptr) {
+        avg_power = updateAveragePower(power_rail, &power_status.power_history[0]);
     } else {
-        if (!binded_cdev_info.power_reversly_check) {
-            if (avg_power < binded_cdev_info.power_thresholds[static_cast<int>(severity)]) {
-                is_over_budget = false;
-            }
-        } else {
-            if (avg_power > binded_cdev_info.power_thresholds[static_cast<int>(severity)]) {
-                is_over_budget = false;
+        const auto offset = power_rail_info.virtual_power_rail_info->offset;
+        float avg_power_val = 0.0;
+        for (size_t i = 0; i < power_rail_info.virtual_power_rail_info->linked_power_rails.size();
+             i++) {
+            float coefficient = power_rail_info.virtual_power_rail_info->coefficients[i];
+            float avg_power_number = updateAveragePower(
+                    power_rail_info.virtual_power_rail_info->linked_power_rails[i],
+                    &power_status.power_history[i]);
+
+            switch (power_rail_info.virtual_power_rail_info->formula) {
+                case FormulaOption::COUNT_THRESHOLD:
+                    if ((coefficient < 0 && avg_power_number < -coefficient) ||
+                        (coefficient >= 0 && avg_power_number >= coefficient))
+                        avg_power_val += 1;
+                    break;
+                case FormulaOption::WEIGHTED_AVG:
+                    avg_power_val += avg_power_number * coefficient;
+                    break;
+                case FormulaOption::MAXIMUM:
+                    if (i == 0)
+                        avg_power_val = std::numeric_limits<float>::lowest();
+                    if (avg_power_number * coefficient > avg_power_val)
+                        avg_power_val = avg_power_number * coefficient;
+                    break;
+                case FormulaOption::MINIMUM:
+                    if (i == 0)
+                        avg_power_val = std::numeric_limits<float>::max();
+                    if (avg_power_number * coefficient < avg_power_val)
+                        avg_power_val = avg_power_number * coefficient;
+                    break;
+                default:
+                    break;
             }
         }
-        LOG(INFO) << "Power rail " << power_rail << ": power threshold = "
-                  << binded_cdev_info.power_thresholds[static_cast<int>(severity)]
-                  << ", avg power = " << avg_power << ", duration = " << duration
-                  << ", deltaEnergy = " << deltaEnergy;
+        if (avg_power_val >= 0) {
+            avg_power_val = avg_power_val + offset;
+        }
+
+        avg_power = avg_power_val;
     }
 
-    switch (binded_cdev_info.release_logic) {
-        case ReleaseLogic::DECREASE:
-            if (!is_over_budget) {
-                if (cdev_release_status.release_step < cdev_release_status.max_release_step) {
-                    cdev_release_status.release_step++;
-                }
-            } else {
-                cdev_release_status.release_step = 0;
-            }
-            break;
-        case ReleaseLogic::BYPASS:
-            cdev_release_status.release_step = is_over_budget ? 0 : std::numeric_limits<int>::max();
-            break;
-        case ReleaseLogic::NONE:
-        default:
-            break;
+    if (avg_power < 0) {
+        avg_power = NAN;
     }
-    return;
+
+    power_status.last_updated_avg_power = avg_power;
+    power_status.last_update_time = now;
+    return avg_power;
+}
+
+bool PowerFiles::refreshPowerStatus(void) {
+    if (!updateEnergyValues()) {
+        LOG(ERROR) << "Failed to update energy values";
+        return false;
+    }
+
+    for (const auto &power_status_pair : power_status_map_) {
+        updatePowerRail(power_status_pair.first);
+    }
+    return true;
 }
 
 }  // namespace implementation

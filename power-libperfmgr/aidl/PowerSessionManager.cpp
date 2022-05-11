@@ -17,10 +17,12 @@
 #define LOG_TAG "powerhal-libperfmgr"
 #define ATRACE_TAG (ATRACE_TAG_POWER | ATRACE_TAG_HAL)
 
-#include <log/log.h>
-#include <utils/Trace.h>
-
 #include "PowerSessionManager.h"
+
+#include <log/log.h>
+#include <perfmgr/HintManager.h>
+#include <processgroup/processgroup.h>
+#include <utils/Trace.h>
 
 namespace aidl {
 namespace google {
@@ -29,12 +31,7 @@ namespace power {
 namespace impl {
 namespace pixel {
 
-void PowerSessionManager::setHintManager(std::shared_ptr<HintManager> const &hint_manager) {
-    // Only initialize hintmanager instance if hint is supported.
-    if (hint_manager->IsHintSupported(kDisableBoostHintName)) {
-        mHintManager = hint_manager;
-    }
-}
+using ::android::perfmgr::HintManager;
 
 void PowerSessionManager::updateHintMode(const std::string &mode, bool enabled) {
     ALOGV("PowerSessionManager::updateHintMode: mode: %s, enabled: %d", mode.c_str(), enabled);
@@ -47,6 +44,9 @@ void PowerSessionManager::updateHintMode(const std::string &mode, bool enabled) 
             mDisplayRefreshRate = 60;
         }
     }
+    if (HintManager::GetInstance()->GetAdpfProfile()) {
+        HintManager::GetInstance()->SetAdpfProfile(mode);
+    }
 }
 
 int PowerSessionManager::getDisplayRefreshRate() {
@@ -55,20 +55,48 @@ int PowerSessionManager::getDisplayRefreshRate() {
 
 void PowerSessionManager::addPowerSession(PowerHintSession *session) {
     std::lock_guard<std::mutex> guard(mLock);
+    for (auto t : session->getTidList()) {
+        if (mTidRefCountMap.find(t) == mTidRefCountMap.end()) {
+            if (!SetTaskProfiles(t, {"ResetUclampGrp"})) {
+                ALOGW("Failed to set ResetUclampGrp task profile for tid:%d", t);
+            } else {
+                mTidRefCountMap[t] = 1;
+            }
+            continue;
+        }
+        if (mTidRefCountMap[t] <= 0) {
+            ALOGE("Error! Unexpected zero/negative RefCount:%d for tid:%d", mTidRefCountMap[t], t);
+            continue;
+        }
+        mTidRefCountMap[t]++;
+    }
     mSessions.insert(session);
 }
 
 void PowerSessionManager::removePowerSession(PowerHintSession *session) {
     std::lock_guard<std::mutex> guard(mLock);
+    for (auto t : session->getTidList()) {
+        if (mTidRefCountMap.find(t) == mTidRefCountMap.end()) {
+            ALOGE("Unexpected Error! Failed to look up tid:%d in TidRefCountMap", t);
+            continue;
+        }
+        mTidRefCountMap[t]--;
+        if (mTidRefCountMap[t] <= 0) {
+            if (!SetTaskProfiles(t, {"NoResetUclampGrp"})) {
+                ALOGW("Failed to set NoResetUclampGrp task profile for tid:%d", t);
+            }
+            mTidRefCountMap.erase(t);
+        }
+    }
     mSessions.erase(session);
 }
 
-std::optional<bool> PowerSessionManager::isAnySessionActive() {
+std::optional<bool> PowerSessionManager::isAnyAppSessionActive() {
     std::lock_guard<std::mutex> guard(mLock);
     bool active = false;
     for (PowerHintSession *s : mSessions) {
         // session active and not stale is actually active.
-        if (s->isActive() && !s->isStale()) {
+        if (s->isActive() && !s->isStale() && s->isAppSession()) {
             active = true;
             break;
         }
@@ -83,7 +111,7 @@ std::optional<bool> PowerSessionManager::isAnySessionActive() {
 }
 
 void PowerSessionManager::handleMessage(const Message &) {
-    auto active = isAnySessionActive();
+    auto active = isAnyAppSessionActive();
     if (!active.has_value()) {
         return;
     }
@@ -95,16 +123,16 @@ void PowerSessionManager::handleMessage(const Message &) {
 }
 
 void PowerSessionManager::enableSystemTopAppBoost() {
-    if (mHintManager) {
+    if (HintManager::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
         ALOGV("PowerSessionManager::enableSystemTopAppBoost!!");
-        mHintManager->EndHint(kDisableBoostHintName);
+        HintManager::GetInstance()->EndHint(kDisableBoostHintName);
     }
 }
 
 void PowerSessionManager::disableSystemTopAppBoost() {
-    if (mHintManager) {
+    if (HintManager::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
         ALOGV("PowerSessionManager::disableSystemTopAppBoost!!");
-        mHintManager->DoHint(kDisableBoostHintName);
+        HintManager::GetInstance()->DoHint(kDisableBoostHintName);
     }
 }
 

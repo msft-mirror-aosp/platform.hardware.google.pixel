@@ -26,6 +26,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 
 #ifndef ARRAY_SIZE
@@ -78,8 +79,8 @@ static constexpr auto ASYNC_COMPLETION_TIMEOUT = std::chrono::milliseconds(100);
 
 static constexpr int32_t COMPOSE_DELAY_MAX_MS = 10000;
 static constexpr int32_t COMPOSE_SIZE_MAX = 127;
-static constexpr int32_t COMPOSE_PWLE_SIZE_MAX_DEFAULT = 127;
-
+static constexpr int32_t COMPOSE_PWLE_SIZE_LIMIT = 82;
+static constexpr int32_t CS40L2X_PWLE_LENGTH_MAX = 4094;
 
 // Measured resonant frequency, f0_measured, is represented by Q10.14 fixed
 // point format on cs40l2x devices. The expression to calculate f0 is:
@@ -93,13 +94,18 @@ static constexpr int32_t Q14_BIT_SHIFT = 14;
 // See the LRA Calibration Support documentation for more details.
 static constexpr int32_t Q16_BIT_SHIFT = 16;
 
-static constexpr int32_t COMPOSE_PWLE_PRIMITIVE_DURATION_MAX_MS = 16383;
-static constexpr float PWLE_LEVEL_MIN = 0.0;
-static constexpr float PWLE_LEVEL_MAX = 1.0;
-static constexpr float CS40L2X_PWLE_LEVEL_MAX = 0.999511;
-static constexpr float PWLE_FREQUENCY_RESOLUTION_HZ = 0.25;
-static constexpr float PWLE_FREQUENCY_MIN_HZ = 0.25;
-static constexpr float PWLE_FREQUENCY_MAX_HZ = 1023.75;
+static constexpr int32_t COMPOSE_PWLE_PRIMITIVE_DURATION_MAX_MS = 999;
+static constexpr float PWLE_LEVEL_MIN = 0.0f;
+static constexpr float PWLE_LEVEL_MAX = 1.0f;
+static constexpr float CS40L2X_PWLE_LEVEL_MAX = 0.99f;
+static constexpr float PWLE_FREQUENCY_RESOLUTION_HZ = 1.0f;
+static constexpr float PWLE_FREQUENCY_MIN_HZ = 1.0f;
+static constexpr float RESONANT_FREQUENCY_DEFAULT = 145.0f;
+static constexpr float PWLE_FREQUENCY_MAX_HZ = 999.0f;
+static constexpr float PWLE_BW_MAP_SIZE =
+    1 + ((PWLE_FREQUENCY_MAX_HZ - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ);
+static constexpr float RAMP_DOWN_CONSTANT = 1048.576f;
+static constexpr float RAMP_DOWN_TIME_MS = 50.0f;
 
 static struct pcm_config haptic_nohost_config = {
     .channels = 1,
@@ -112,6 +118,75 @@ static struct pcm_config haptic_nohost_config = {
 static uint8_t amplitudeToScale(float amplitude, float maximum) {
     return std::round((-20 * std::log10(amplitude / static_cast<float>(maximum))) /
                       (AMP_ATTENUATE_STEP_SIZE));
+}
+
+// Discrete points of frequency:max_level pairs as recommended by the document
+// [R4O6] Max. Allowable Chirp Levels (go/r4o6-max-chirp-levels) around resonant frequency
+#if defined(LUXSHARE_ICT_081545)
+static std::map<float, float> discretePwleMaxLevels = {{120.0, 0.4},  {130.0, 0.31}, {140.0, 0.14},
+                                                       {145.0, 0.09}, {150.0, 0.15}, {160.0, 0.35},
+                                                       {170.0, 0.4}};
+// Discrete points of frequency:max_level pairs as recommended by the document
+// [P7] Max. Allowable Chirp Levels (go/p7-max-chirp-levels) around resonant frequency
+#elif defined(LUXSHARE_ICT_LT_XLRA1906D)
+static std::map<float, float> discretePwleMaxLevels = {{145.0, 0.38}, {150.0, 0.35}, {160.0, 0.35},
+                                                       {170.0, 0.15}, {180.0, 0.35}, {190.0, 0.35},
+                                                       {200.0, 0.38}};
+#else
+static std::map<float, float> discretePwleMaxLevels = {};
+#endif
+
+// Initialize all limits to 0.4 according to the document [R4O6] Max. Allowable Chirp Levels
+// (go/r4o6-max-chirp-levels)
+#if defined(LUXSHARE_ICT_081545)
+std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 0.4);
+// Initialize all limits to 0.38 according to the document [P7] Max. Allowable Chirp Levels
+// (go/p7-max-chirp-levels)
+#elif defined(LUXSHARE_ICT_LT_XLRA1906D)
+std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 0.38);
+#else
+std::vector<float> pwleMaxLevelLimitMap(PWLE_BW_MAP_SIZE, 1.0);
+#endif
+
+void Vibrator::createPwleMaxLevelLimitMap() {
+    int32_t capabilities;
+    Vibrator::getCapabilities(&capabilities);
+    if (capabilities & IVibrator::CAP_FREQUENCY_CONTROL) {
+        std::map<float, float>::iterator itr0, itr1;
+
+        if (discretePwleMaxLevels.empty()) {
+            return;
+        }
+        if (discretePwleMaxLevels.size() == 1) {
+            itr0 = discretePwleMaxLevels.begin();
+            float pwleMaxLevelLimitMapIdx =
+                    (itr0->first - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ;
+            pwleMaxLevelLimitMap[pwleMaxLevelLimitMapIdx] = itr0->second;
+            return;
+        }
+
+        itr0 = discretePwleMaxLevels.begin();
+        itr1 = std::next(itr0, 1);
+
+        while (itr1 != discretePwleMaxLevels.end()) {
+            float x0 = itr0->first;
+            float y0 = itr0->second;
+            float x1 = itr1->first;
+            float y1 = itr1->second;
+            float pwleMaxLevelLimitMapIdx =
+                    (itr0->first - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ;
+
+            for (float xp = x0; xp < (x1 + PWLE_FREQUENCY_RESOLUTION_HZ);
+                 xp += PWLE_FREQUENCY_RESOLUTION_HZ) {
+                float yp = y0 + ((y1 - y0) / (x1 - x0)) * (xp - x0);
+
+                pwleMaxLevelLimitMap[pwleMaxLevelLimitMapIdx++] = yp;
+            }
+
+            itr0++;
+            itr1++;
+        }
+    }
 }
 
 enum class AlwaysOnId : uint32_t {
@@ -132,6 +207,11 @@ Vibrator::Vibrator(std::unique_ptr<HwApi> hwapi, std::unique_ptr<HwCal> hwcal)
 
     if (mHwCal->getF0(&caldata)) {
         mHwApi->setF0(caldata);
+        mResonantFrequency = static_cast<float>(caldata) / (1 << Q14_BIT_SHIFT);
+    } else {
+        ALOGE("Failed to get resonant frequency (%d): %s, using default resonant HZ: %f", errno,
+              strerror(errno), RESONANT_FREQUENCY_DEFAULT);
+        mResonantFrequency = RESONANT_FREQUENCY_DEFAULT;
     }
     if (mHwCal->getRedc(&caldata)) {
         mHwApi->setRedc(caldata);
@@ -184,11 +264,15 @@ Vibrator::Vibrator(std::unique_ptr<HwApi> hwapi, std::unique_ptr<HwCal> hwcal)
 
     mHwApi->setClabEnable(true);
 
-    if (!(getPwleCompositionSizeMax(&compositionSizeMax).isOk())) {
+    if (!(getPwleCompositionSizeMax(&mCompositionSizeMax).isOk())) {
         ALOGE("Failed to get pwle composition size max, using default size: %d",
-              COMPOSE_PWLE_SIZE_MAX_DEFAULT);
-        compositionSizeMax = COMPOSE_PWLE_SIZE_MAX_DEFAULT;
+              COMPOSE_PWLE_SIZE_LIMIT);
+        mCompositionSizeMax = COMPOSE_PWLE_SIZE_LIMIT;
     }
+
+    createPwleMaxLevelLimitMap();
+    mIsUnderExternalControl = false;
+    setPwleRampDown();
 }
 
 ndk::ScopedAStatus Vibrator::getCapabilities(int32_t *_aidl_return) {
@@ -217,6 +301,7 @@ ndk::ScopedAStatus Vibrator::off() {
         ALOGE("Failed to turn vibrator off (%d): %s", errno, strerror(errno));
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     }
+    mActiveId = -1;
     return ndk::ScopedAStatus::ok();
 }
 
@@ -264,6 +349,27 @@ ndk::ScopedAStatus Vibrator::setExternalControl(bool enabled) {
     ATRACE_NAME("Vibrator::setExternalControl");
     setGlobalAmplitude(enabled);
 
+    if (isUnderExternalControl() == enabled) {
+        if (enabled) {
+            ALOGE("Restart the external process.");
+            if (mHasHapticAlsaDevice) {
+                if (!enableHapticPcmAmp(&mHapticPcm, !enabled, mCard, mDevice)) {
+                    ALOGE("Failed to %s haptic pcm device: %d", (enabled ? "enable" : "disable"),
+                          mDevice);
+                    return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+                }
+            }
+            if (mHwApi->hasAspEnable()) {
+                if (!mHwApi->setAspEnable(!enabled)) {
+                    ALOGE("Failed to set external control (%d): %s", errno, strerror(errno));
+                    return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+                }
+            }
+        } else {
+            ALOGE("The external control is already disabled.");
+            return ndk::ScopedAStatus::ok();
+        }
+    }
     if (mHasHapticAlsaDevice) {
         if (!enableHapticPcmAmp(&mHapticPcm, enabled, mCard, mDevice)) {
             ALOGE("Failed to %s haptic pcm device: %d", (enabled ? "enable" : "disable"), mDevice);
@@ -370,21 +476,21 @@ ndk::ScopedAStatus Vibrator::compose(const std::vector<CompositeEffect> &composi
 
 ndk::ScopedAStatus Vibrator::on(uint32_t timeoutMs, uint32_t effectIndex,
                                 const std::shared_ptr<IVibratorCallback> &callback) {
+    if (isUnderExternalControl()) {
+        setExternalControl(false);
+        ALOGE("Device is under external control mode. Force to disable it to prevent chip hang "
+              "problem.");
+    }
     if (mAsyncHandle.wait_for(ASYNC_COMPLETION_TIMEOUT) != std::future_status::ready) {
-        ALOGE("Previous vibration pending.");
-        // TODO(b/189395620): Need vendor's support about the chip "STATUS" correctness
-        if (!mBypassPending)
-            return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+        ALOGE("Previous vibration pending: prev: %d, curr: %d", mActiveId, effectIndex);
+        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     }
 
-    // TODO(b/189395620): Need vendor's support about the chip "STATUS" correctness
-    // Only bypass CLICK effect
-    mBypassPending = (effectIndex == WAVEFORM_CLICK_INDEX) ? true : false;
-
-    ALOGI("Effect index: %d", effectIndex);
     mHwApi->setEffectIndex(effectIndex);
     mHwApi->setDuration(timeoutMs);
     mHwApi->setActivate(1);
+
+    mActiveId = effectIndex;
 
     mAsyncHandle = std::async(&Vibrator::waitForComplete, this, callback);
 
@@ -460,12 +566,7 @@ ndk::ScopedAStatus Vibrator::alwaysOnDisable(int32_t id) {
 }
 
 ndk::ScopedAStatus Vibrator::getResonantFrequency(float *resonantFreqHz) {
-    uint32_t caldata;
-    if (!mHwCal->getF0(&caldata)) {
-        ALOGE("Failed to get resonant frequency (%d): %s", errno, strerror(errno));
-        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
-    }
-    *resonantFreqHz = static_cast<float>(caldata) / (1 << Q14_BIT_SHIFT);
+    *resonantFreqHz = mResonantFrequency;
 
     return ndk::ScopedAStatus::ok();
 }
@@ -508,9 +609,7 @@ ndk::ScopedAStatus Vibrator::getBandwidthAmplitudeMap(std::vector<float> *_aidl_
     int32_t capabilities;
     Vibrator::getCapabilities(&capabilities);
     if (capabilities & IVibrator::CAP_FREQUENCY_CONTROL) {
-        int mapSize =
-            1 + ((PWLE_FREQUENCY_MAX_HZ - PWLE_FREQUENCY_MIN_HZ) / PWLE_FREQUENCY_RESOLUTION_HZ);
-        std::vector<float> bandwidthAmplitudeMap(mapSize, 1.0);
+        std::vector<float> bandwidthAmplitudeMap(PWLE_BW_MAP_SIZE, 1.0);
         *_aidl_return = bandwidthAmplitudeMap;
         return ndk::ScopedAStatus::ok();
     } else {
@@ -538,7 +637,8 @@ ndk::ScopedAStatus Vibrator::getPwleCompositionSizeMax(int32_t *maxSize) {
             ALOGE("Failed to get availablePwleSegments (%d): %s", errno, strerror(errno));
             return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
         }
-        *maxSize = segments;
+        *maxSize = (segments > COMPOSE_PWLE_SIZE_LIMIT) ? COMPOSE_PWLE_SIZE_LIMIT : segments;
+        mCompositionSizeMax = *maxSize;
         return ndk::ScopedAStatus::ok();
     } else {
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
@@ -568,15 +668,8 @@ ndk::ScopedAStatus Vibrator::setPwle(const std::string &pwleQueue) {
     return ndk::ScopedAStatus::ok();
 }
 
-static void resetPreviousEndAmplitudeEndFrequency(float &prevEndAmplitude,
-                                                  float &prevEndFrequency) {
-    const float reset = -1.0;
-    prevEndAmplitude = reset;
-    prevEndFrequency = reset;
-}
-
-static void incrementIndex(int &index) {
-    index += 1;
+static void incrementIndex(int *index) {
+    *index += 1;
 }
 
 static void constructActiveDefaults(std::ostringstream &pwleBuilder, const int &segmentIdx) {
@@ -589,16 +682,16 @@ static void constructActiveDefaults(std::ostringstream &pwleBuilder, const int &
 static void constructActiveSegment(std::ostringstream &pwleBuilder, const int &segmentIdx,
                                    int duration, float amplitude, float frequency) {
     pwleBuilder << ",T" << segmentIdx << ":" << duration;
-    pwleBuilder << ",L" << segmentIdx << ":" << amplitude;
-    pwleBuilder << ",F" << segmentIdx << ":" << frequency;
+    pwleBuilder << ",L" << segmentIdx << ":" << std::setprecision(1) << amplitude;
+    pwleBuilder << ",F" << segmentIdx << ":" << std::lroundf(frequency);
     constructActiveDefaults(pwleBuilder, segmentIdx);
 }
 
 static void constructBrakingSegment(std::ostringstream &pwleBuilder, const int &segmentIdx,
-                                    int duration, Braking brakingType) {
+                                    int duration, Braking brakingType, float frequency) {
     pwleBuilder << ",T" << segmentIdx << ":" << duration;
     pwleBuilder << ",L" << segmentIdx << ":" << 0;
-    pwleBuilder << ",F" << segmentIdx << ":" << PWLE_FREQUENCY_MIN_HZ;
+    pwleBuilder << ",F" << segmentIdx << ":" << std::lroundf(frequency);
     pwleBuilder << ",C" << segmentIdx << ":0";
     pwleBuilder << ",B" << segmentIdx << ":"
                 << static_cast<std::underlying_type<Braking>::type>(brakingType);
@@ -612,13 +705,12 @@ ndk::ScopedAStatus Vibrator::composePwle(const std::vector<PrimitivePwle> &compo
     std::ostringstream pwleBuilder;
     std::string pwleQueue;
 
-    if (composite.size() <= 0 || composite.size() > compositionSizeMax) {
+    if (composite.size() <= 0 || composite.size() > mCompositionSizeMax) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
     }
 
-    float prevEndAmplitude;
-    float prevEndFrequency;
-    resetPreviousEndAmplitudeEndFrequency(prevEndAmplitude, prevEndFrequency);
+    float prevEndAmplitude = 0;
+    float prevEndFrequency = mResonantFrequency;
 
     int segmentIdx = 0;
     uint32_t totalDuration = 0;
@@ -652,16 +744,28 @@ ndk::ScopedAStatus Vibrator::composePwle(const std::vector<PrimitivePwle> &compo
                     return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
                 }
 
+                // clip to the hard limit on input level from pwleMaxLevelLimitMap
+                float maxLevelLimit =
+                    pwleMaxLevelLimitMap[active.startFrequency / PWLE_FREQUENCY_RESOLUTION_HZ - 1];
+                if (active.startAmplitude > maxLevelLimit) {
+                    active.startAmplitude = maxLevelLimit;
+                }
+                maxLevelLimit =
+                    pwleMaxLevelLimitMap[active.endFrequency / PWLE_FREQUENCY_RESOLUTION_HZ - 1];
+                if (active.endAmplitude > maxLevelLimit) {
+                    active.endAmplitude = maxLevelLimit;
+                }
+
                 if (!((active.startAmplitude == prevEndAmplitude) &&
                       (active.startFrequency == prevEndFrequency))) {
                     constructActiveSegment(pwleBuilder, segmentIdx, 0, active.startAmplitude,
                                            active.startFrequency);
-                    incrementIndex(segmentIdx);
+                    incrementIndex(&segmentIdx);
                 }
 
                 constructActiveSegment(pwleBuilder, segmentIdx, active.duration,
                                        active.endAmplitude, active.endFrequency);
-                incrementIndex(segmentIdx);
+                incrementIndex(&segmentIdx);
 
                 prevEndAmplitude = active.endAmplitude;
                 prevEndFrequency = active.endFrequency;
@@ -677,13 +781,11 @@ ndk::ScopedAStatus Vibrator::composePwle(const std::vector<PrimitivePwle> &compo
                     return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
                 }
 
-                constructBrakingSegment(pwleBuilder, segmentIdx, 0, braking.braking);
-                incrementIndex(segmentIdx);
+                constructBrakingSegment(pwleBuilder, segmentIdx, braking.duration, braking.braking,
+                                        prevEndFrequency);
+                incrementIndex(&segmentIdx);
 
-                constructBrakingSegment(pwleBuilder, segmentIdx, braking.duration, braking.braking);
-                incrementIndex(segmentIdx);
-
-                resetPreviousEndAmplitudeEndFrequency(prevEndAmplitude, prevEndFrequency);
+                prevEndAmplitude = 0;
                 totalDuration += braking.duration;
                 break;
             }
@@ -693,16 +795,22 @@ ndk::ScopedAStatus Vibrator::composePwle(const std::vector<PrimitivePwle> &compo
     pwleQueue = pwleBuilder.str();
     ALOGD("composePwle queue: (%s)", pwleQueue.c_str());
 
-    ndk::ScopedAStatus status = setPwle(pwleQueue);
-    if (!status.isOk()) {
-        ALOGE("Failed to write pwle queue");
-        return status;
+    if (pwleQueue.size() > CS40L2X_PWLE_LENGTH_MAX) {
+        ALOGE("PWLE string too large(%u)", static_cast<uint32_t>(pwleQueue.size()));
+        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+    } else {
+        ALOGD("PWLE string : %u", static_cast<uint32_t>(pwleQueue.size()));
+        ndk::ScopedAStatus status = setPwle(pwleQueue);
+        if (!status.isOk()) {
+            ALOGE("Failed to write pwle queue");
+            return status;
+        }
     }
-
+    setEffectAmplitude(VOLTAGE_SCALE_MAX, VOLTAGE_SCALE_MAX);
     mHwApi->setEffectIndex(WAVEFORM_UNSAVED_TRIGGER_QUEUE_INDEX);
 
     totalDuration += MAX_COLD_START_LATENCY_MS;
-    mHwApi->setDuration(MAX_TIME_MS);
+    mHwApi->setDuration(totalDuration);
 
     mHwApi->setActivate(1);
 
@@ -1073,6 +1181,22 @@ fail:
     pcm_close(*haptic_pcm);
     *haptic_pcm = NULL;
     return false;
+}
+
+void Vibrator::setPwleRampDown() {
+    // The formula for calculating the ramp down coefficient to be written into
+    // pwle_ramp_down is as follows:
+    //    Crd = 1048.576 / Trd
+    // where Trd is the desired ramp down time in seconds
+    // pwle_ramp_down accepts only 24 bit integers values
+
+    const float seconds = RAMP_DOWN_TIME_MS / 1000;
+    const auto ramp_down_coefficient = static_cast<uint32_t>(RAMP_DOWN_CONSTANT / seconds);
+
+    if (!mHwApi->setPwleRampDown(ramp_down_coefficient)) {
+        ALOGE("Failed to write \"%d\" to pwle_ramp_down (%d): %s", ramp_down_coefficient, errno,
+              strerror(errno));
+    }
 }
 
 }  // namespace vibrator
