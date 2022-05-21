@@ -90,7 +90,7 @@ void BatteryDefender::removeLineEndings(std::string *str) {
     str->erase(std::remove(str->begin(), str->end(), '\r'), str->end());
 }
 
-int BatteryDefender::readFileToInt(const std::string &path) {
+int BatteryDefender::readFileToInt(const std::string &path, const bool silent) {
     std::string buffer;
     int value = 0;  // default
 
@@ -99,7 +99,9 @@ int BatteryDefender::readFileToInt(const std::string &path) {
     }
 
     if (!android::base::ReadFileToString(path, &buffer)) {
-        LOG(ERROR) << "Failed to read " << path;
+        if (silent == false) {
+            LOG(ERROR) << "Failed to read " << path;
+        }
     } else {
         removeLineEndings(&buffer);
         if (!android::base::ParseInt(buffer, &value)) {
@@ -196,6 +198,7 @@ bool BatteryDefender::isWiredPresent(void) {
                 std::string portName = std::strtok(ep->d_name, "-");
                 std::string path = kTypeCPath + portName + "/power_role";
                 if (isTypeCSink(path)) {
+                    closedir(dp);
                     return true;
                 }
             }
@@ -206,14 +209,20 @@ bool BatteryDefender::isWiredPresent(void) {
     return false;
 }
 
+bool BatteryDefender::isDockPresent(void) {
+    return readFileToInt(kPathDOCKChargerPresent, true) != 0;
+}
+
 bool BatteryDefender::isChargePowerAvailable(void) {
     // USB presence is an indicator of power availability
     const bool chargerPresentWired = isWiredPresent();
     const bool chargerPresentWireless = readFileToInt(mPathWirelessPresent) != 0;
+    const bool chargerPresentDock = isDockPresent();
     mIsWiredPresent = chargerPresentWired;
     mIsWirelessPresent = chargerPresentWireless;
+    mIsDockPresent = chargerPresentDock;
 
-    return chargerPresentWired || chargerPresentWireless;
+    return chargerPresentWired || chargerPresentWireless || chargerPresentDock;
 }
 
 bool BatteryDefender::isDefaultChargeLevel(const int start, const int stop) {
@@ -429,6 +438,14 @@ void BatteryDefender::updateDefenderProperties(
             health_info->chargerWirelessOnline = true;
         }
     }
+
+    /* Do the same as above for dock adapters */
+    if (health_info->chargerDockOnline == false) {
+        /* Override if the USB is connected and a battery defender is active */
+        if (mIsDockPresent && health_info->batteryHealth == BatteryHealth::OVERHEAT) {
+            health_info->chargerDockOnline = true;
+        }
+    }
 }
 
 void BatteryDefender::update(HealthInfo *health_info) {
@@ -474,6 +491,7 @@ void BatteryDefender::update(struct android::BatteryProperties *props) {
     props->chargerAcOnline = health_info.chargerAcOnline;
     props->chargerUsbOnline = health_info.chargerUsbOnline;
     props->chargerWirelessOnline = health_info.chargerWirelessOnline;
+    props->chargerDockOnline = health_info.chargerDockOnline;
     props->batteryHealth = static_cast<int>(health_info.batteryHealth);
     // update() doesn't change other fields.
 }
