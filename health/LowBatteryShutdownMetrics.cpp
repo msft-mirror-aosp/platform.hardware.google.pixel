@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-#include <pixelhealth/HealthHelper.h>
 #include <pixelhealth/LowBatteryShutdownMetrics.h>
 #include <pixelhealth/StatsHelper.h>
 
@@ -24,8 +23,7 @@ namespace google {
 namespace pixel {
 namespace health {
 
-using aidl::android::hardware::health::BatteryStatus;
-using aidl::android::hardware::health::HealthInfo;
+using android::BATTERY_STATUS_DISCHARGING;
 using android::base::GetProperty;
 using android::base::ReadFileToString;
 using android::base::SetProperty;
@@ -90,20 +88,16 @@ bool LowBatteryShutdownMetrics::saveVoltageAvg(void) {
     return SetProperty(kPersistProp, prop_contents);
 }
 
-void LowBatteryShutdownMetrics::logShutdownVoltage(const HealthInfo &health_info) {
+void LowBatteryShutdownMetrics::logShutdownVoltage(struct android::BatteryProperties *props) {
     // If we're about to shut down due to low battery, save voltage_avg
-    if (!prop_written_ && health_info.batteryLevel == 0 &&
-        health_info.batteryStatus == BatteryStatus::DISCHARGING) {
+    if (!prop_written_ && props->batteryLevel == 0 &&
+        props->batteryStatus == android::BATTERY_STATUS_DISCHARGING) {
         prop_written_ = saveVoltageAvg();
     } else if (!prop_empty_) {  // We have data to upload
         uploadVoltageAvg();
     }
 
     return;
-}
-
-void LowBatteryShutdownMetrics::logShutdownVoltage(struct android::BatteryProperties *props) {
-    logShutdownVoltage(ToHealthInfo(props));
 }
 
 }  // namespace health

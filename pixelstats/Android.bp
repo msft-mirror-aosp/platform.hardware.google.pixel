@@ -56,15 +56,9 @@ cc_library {
   vendor: true,
   export_include_dirs: ["include"],
 
-  tidy_disabled_srcs: [
-    "MmMetricsReporter.cpp", // b/215238264
-    "WlcReporter.cpp", // b/215238264
-  ],
   srcs: [
     "BatteryCapacityReporter.cpp",
     "BatteryEEPROMReporter.cpp",
-    "BatteryHealthReporter.cpp",
-    "ChargeStatsReporter.cpp",
     "DropDetect.cpp",
     "MmMetricsReporter.cpp",
     "MitigationStatsReporter.cpp",
@@ -81,19 +75,18 @@ cc_library {
     "-Werror",
   ],
   shared_libs: [
-    "android.frameworks.stats-V1-ndk",
+    "android.frameworks.stats-V1-ndk_platform",
     "libbase",
     "libbinder_ndk",
     "libcutils",
     "libhidlbase",
     "liblog",
-    "libprotobuf-cpp-lite",
     "libutils",
     "libsensorndkbridge",
     "pixelatoms-cpp",
   ],
   export_shared_lib_headers: [
-    "android.frameworks.stats-V1-ndk",
+    "android.frameworks.stats-V1-ndk_platform",
     "pixelatoms-cpp",
   ],
   static_libs: [

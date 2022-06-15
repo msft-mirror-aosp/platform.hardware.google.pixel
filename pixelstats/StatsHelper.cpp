@@ -59,37 +59,12 @@ void reportSpeakerImpedance(const std::shared_ptr<IStats> &stats_client,
     values[1] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorSpeakerImpedance,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk())
         ALOGE("Unable to report VendorSpeakerImpedance to Stats service");
-}
-
-void reportSpeakerHealthStat(const std::shared_ptr<IStats> &stats_client,
-                             const PixelAtoms::VendorSpeakerStatsReported &speakerHealthStat) {
-    // Load values array
-    std::vector<VendorAtomValue> values(5);
-    VendorAtomValue tmp;
-    tmp.set<VendorAtomValue::intValue>(speakerHealthStat.speaker_location());
-    values[0] = tmp;
-    tmp.set<VendorAtomValue::intValue>(speakerHealthStat.impedance());
-    values[1] = tmp;
-    tmp.set<VendorAtomValue::intValue>(speakerHealthStat.max_temperature());
-    values[2] = tmp;
-    tmp.set<VendorAtomValue::intValue>(speakerHealthStat.excursion());
-    values[3] = tmp;
-    tmp.set<VendorAtomValue::intValue>(speakerHealthStat.heartbeat());
-    values[4] = tmp;
-
-    // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
-                        .atomId = PixelAtoms::Atom::kVendorSpeakerStatsReported,
-                        .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report VendorSpeakerStatsReported to Stats service");
 }
 
 void reportSlowIo(const std::shared_ptr<IStats> &stats_client,
@@ -103,7 +78,7 @@ void reportSlowIo(const std::shared_ptr<IStats> &stats_client,
     values[1] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorSlowIo,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -124,7 +99,7 @@ void reportChargeCycles(const std::shared_ptr<IStats> &stats_client,
     }
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorChargeCycles,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -145,7 +120,7 @@ void reportHardwareFailed(const std::shared_ptr<IStats> &stats_client,
     values[2] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorHardwareFailed,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -168,7 +143,7 @@ void reportSpeechDspStat(const std::shared_ptr<IStats> &stats_client,
     values[3] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorSpeechDspStat,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -189,7 +164,7 @@ void reportPhysicalDropDetected(const std::shared_ptr<IStats> &stats_client,
     values[2] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorPhysicalDropDetected,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
@@ -214,7 +189,7 @@ void reportUsbPortOverheat(const std::shared_ptr<IStats> &stats_client,
     values[4] = tmp;
 
     // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
+    VendorAtom event = {.reverseDomainName = PixelAtoms::ReverseDomainNames().pixel(),
                         .atomId = PixelAtoms::Atom::kVendorUsbPortOverheat,
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);

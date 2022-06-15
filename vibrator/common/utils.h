@@ -15,14 +15,13 @@
  */
 #pragma once
 
-#include <android-base/macros.h>
-#include <android-base/parsedouble.h>
-#include <android-base/properties.h>
-#include <log/log.h>
-
 #include <fstream>
 #include <map>
 #include <sstream>
+
+#include <android-base/macros.h>
+#include <android-base/properties.h>
+#include <log/log.h>
 
 namespace aidl {
 namespace android {
@@ -86,16 +85,7 @@ inline void unpack<std::string>(std::istream &stream, std::string *value) {
 
 template <typename T>
 inline Enable_If_Signed<T, T> getProperty(const std::string &key, const T def) {
-    if (std::is_floating_point_v<T>) {
-        float result;
-        std::string value = ::android::base::GetProperty(key, "");
-        if (!value.empty() && ::android::base::ParseFloat(value, &result)) {
-            return result;
-        }
-        return def;
-    } else {
-        return ::android::base::GetIntProperty(key, def);
-    }
+    return ::android::base::GetIntProperty(key, def);
 }
 
 template <typename T>
