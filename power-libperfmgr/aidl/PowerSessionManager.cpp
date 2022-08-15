@@ -97,7 +97,7 @@ void PowerSessionManager::updateHintBoost(const std::string &boost, int32_t dura
     ALOGV("PowerSessionManager::updateHintBoost: boost: %s, durationMs: %d", boost.c_str(),
           durationMs);
     if (boost.compare("DISPLAY_UPDATE_IMMINENT") == 0) {
-        wakeSessions();
+        PowerHintMonitor::getInstance()->getLooper()->sendMessage(mWakeupHandler, NULL);
     }
 }
 
@@ -162,12 +162,11 @@ void PowerSessionManager::setUclampMinLocked(PowerHintSession *session, int val)
         // Get thex max uclamp.min across sessions which include the tid.
         int tidMax = 0;
         for (PowerHintSession *s : mTidSessionListMap[t]) {
-            if (!s->isActive() || s->isStale())
+            if (!s->isActive() || s->isTimeout())
                 continue;
             tidMax = std::max(tidMax, s->getUclampMin());
         }
-        val = std::max(val, tidMax);
-        set_uclamp_min(t, val);
+        set_uclamp_min(t, std::max(val, tidMax));
     }
 }
 
@@ -176,7 +175,7 @@ std::optional<bool> PowerSessionManager::isAnyAppSessionActive() {
     bool active = false;
     for (PowerHintSession *s : mSessions) {
         // session active and not stale is actually active.
-        if (s->isActive() && !s->isStale() && s->isAppSession()) {
+        if (s->isActive() && !s->isTimeout() && s->isAppSession()) {
             active = true;
             break;
         }
@@ -200,6 +199,10 @@ void PowerSessionManager::handleMessage(const Message &) {
     } else {
         enableSystemTopAppBoost();
     }
+}
+
+void PowerSessionManager::WakeupHandler::handleMessage(const Message &) {
+    PowerSessionManager::getInstance()->wakeSessions();
 }
 
 void PowerSessionManager::dumpToFd(int fd) {
