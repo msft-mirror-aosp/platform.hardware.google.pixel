@@ -88,7 +88,10 @@ Power::Power(std::shared_ptr<DisplayLowPower> dlpw, std::shared_ptr<AdaptiveCpu>
 
 ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
     LOG(DEBUG) << "Power setMode: " << toString(type) << " to: " << enabled;
-    PowerSessionManager::getInstance()->updateHintMode(toString(type), enabled);
+    if (HintManager::GetInstance()->GetAdpfProfile() &&
+        HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs > 0) {
+        PowerSessionManager::getInstance()->updateHintMode(toString(type), enabled);
+    }
     switch (type) {
         case Mode::LOW_POWER:
             mDisplayLowPower->SetDisplayLowPower(enabled);
@@ -188,6 +191,10 @@ ndk::ScopedAStatus Power::isModeSupported(Mode type, bool *_aidl_return) {
 
 ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
     LOG(DEBUG) << "Power setBoost: " << toString(type) << " duration: " << durationMs;
+    if (HintManager::GetInstance()->GetAdpfProfile() &&
+        HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs > 0) {
+        PowerSessionManager::getInstance()->updateHintBoost(toString(type), durationMs);
+    }
     switch (type) {
         case Boost::INTERACTION:
             if (mVRModeOn || mSustainedPerfModeOn) {
@@ -243,6 +250,7 @@ binder_status_t Power::dump(int fd, const char **, uint32_t) {
             boolToString(mSustainedPerfModeOn)));
     // Dump nodes through libperfmgr
     HintManager::GetInstance()->DumpToFd(fd);
+    PowerSessionManager::getInstance()->dumpToFd(fd);
     mAdaptiveCpu->DumpToFd(fd);
     if (!::android::base::WriteStringToFd(buf, fd)) {
         PLOG(ERROR) << "Failed to dump state to fd";
