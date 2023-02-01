@@ -50,6 +50,8 @@ class PowerSessionManager : public MessageHandler {
     // monitoring session status
     void addPowerSession(PowerHintSession *session);
     void removePowerSession(PowerHintSession *session);
+    void addThreadsFromPowerSession(PowerHintSession *session);
+    void removeThreadsFromPowerSession(PowerHintSession *session);
     void setUclampMin(PowerHintSession *session, int min);
     void setUclampMinLocked(PowerHintSession *session, int min);
     void handleMessage(const Message &message) override;
@@ -62,14 +64,6 @@ class PowerSessionManager : public MessageHandler {
     }
 
   private:
-    class WakeupHandler : public MessageHandler {
-      public:
-        WakeupHandler() {}
-        void handleMessage(const Message &message) override;
-    };
-
-  private:
-    void wakeSessions();
     std::optional<bool> isAnyAppSessionActive();
     void disableSystemTopAppBoost();
     void enableSystemTopAppBoost();
@@ -78,7 +72,6 @@ class PowerSessionManager : public MessageHandler {
     std::unordered_set<PowerHintSession *> mSessions;  // protected by mLock
     std::unordered_map<int, int> mTidRefCountMap;      // protected by mLock
     std::unordered_map<int, std::unordered_set<PowerHintSession *>> mTidSessionListMap;
-    sp<WakeupHandler> mWakeupHandler;
     bool mActive;  // protected by mLock
     /**
      * mLock to pretect the above data objects opertions.
@@ -90,9 +83,7 @@ class PowerSessionManager : public MessageHandler {
         : kDisableBoostHintName(::android::base::GetProperty(kPowerHalAdpfDisableTopAppBoost,
                                                              "ADPF_DISABLE_TA_BOOST")),
           mActive(false),
-          mDisplayRefreshRate(60) {
-        mWakeupHandler = sp<WakeupHandler>(new WakeupHandler());
-    }
+          mDisplayRefreshRate(60) {}
     PowerSessionManager(PowerSessionManager const &) = delete;
     void operator=(PowerSessionManager const &) = delete;
 };

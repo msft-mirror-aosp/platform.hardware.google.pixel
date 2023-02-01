@@ -48,7 +48,11 @@ const std::map<std::string, TracingConfig> kTracingMap = {
         },
         {
                 "memory",
-                {"Memory", {{"fastrpc/fastrpc_dma_stat", false}, {"dmabuf_heap", false}}},
+                {"Memory",
+                 {{"fastrpc/fastrpc_dma_stat", false},
+                  {"dmabuf_heap", false},
+                  {"cma/cma_alloc_start", false},
+                  {"cma/cma_alloc_info", false}}},
         },
         {
                 "ion",
@@ -68,6 +72,10 @@ const std::map<std::string, TracingConfig> kTracingMap = {
                  {{"lmh/lmh_dcvs_freq", false},
                   {"thermal_exynos", false},
                   {"thermal_exynos_gpu", false}}},
+        },
+        {
+                "camera",
+                {"Camera LWIS", {{"lwis", false}}},
         },
 };
 
