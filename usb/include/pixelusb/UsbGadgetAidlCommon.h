@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-#ifndef HARDWARE_GOOGLE_PIXEL_USB_USBGADGETCOMMON_H
-#define HARDWARE_GOOGLE_PIXEL_USB_USBGADGETCOMMON_H
+#ifndef HARDWARE_GOOGLE_PIXEL_USB_USBGADGETAIDLCOMMON_H
+#define HARDWARE_GOOGLE_PIXEL_USB_USBGADGETAIDLCOMMON_H
 
 #include <android-base/file.h>
 #include <android-base/properties.h>
-#include <android-base/strings.h>
 #include <android-base/unique_fd.h>
-#include <android/hardware/usb/gadget/1.0/IUsbGadget.h>
+
+#include <aidl/android/hardware/usb/gadget/IUsbGadget.h>
+#include <aidl/android/hardware/usb/gadget/GadgetFunction.h>
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -33,7 +35,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utils/Log.h>
-
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -74,19 +75,13 @@ constexpr char kVendorRndisConfig[] = "vendor.usb.rndis.config";
 #define FUNCTION_NAME "function"
 #define FUNCTION_PATH CONFIG_PATH FUNCTION_NAME
 #define RNDIS_PATH FUNCTIONS_PATH "gsi.rndis"
-#define TYPEC_GADGET_MODE_DISABLE "0"
-#define TYPEC_GADGET_MODE_ENABLE "1"
-#define GADGET_DEACTIVATE "0"
-#define GADGET_ACTIVATE "1"
 
+using ::aidl::android::hardware::usb::gadget::GadgetFunction;
+using ::aidl::android::hardware::usb::gadget::Status;
 using ::android::base::GetProperty;
-using ::android::base::ReadFileToString;
 using ::android::base::SetProperty;
-using ::android::base::Trim;
 using ::android::base::unique_fd;
 using ::android::base::WriteStringToFile;
-using ::android::hardware::usb::gadget::V1_0::GadgetFunction;
-using ::android::hardware::usb::gadget::V1_0::Status;
 
 using ::std::lock_guard;
 using ::std::move;
@@ -140,27 +135,28 @@ class MonitorFfs {
   bool mMonitorRunning;
 
  public:
-   MonitorFfs(const char *const gadget, const char *const extconTypecState = "",
-              const char *const usbGadgetState = "");
-   // Inits all the UniqueFds.
-   void reset();
-   // Starts monitoring endpoints and pullup the gadget when
-   // the descriptors are written.
-   bool startMonitor();
-   // Waits for timeout_ms for gadget pull up to happen.
-   // Returns immediately if the gadget is already pulled up.
-   bool waitForPullUp(int timeout_ms);
-   // Adds the given fd to the watch list.
-   bool addInotifyFd(string fd);
-   // Adds the given endpoint to the watch list.
-   void addEndPoint(string ep);
-   // Registers the async callback from the caller to notify the caller
-   // when the gadget pull up happens.
-   void registerFunctionsAppliedCallback(void (*callback)(bool functionsApplied, void *(payload)),
-                                         void *payload);
-   bool isMonitorRunning();
-   // Ep monitoring and the gadget pull up logic.
-   static void *startMonitorFd(void *param);
+  MonitorFfs(const char *const gadget, const char *const extconTypecState = "",
+             const char *const usbGadgetState = "");
+  // Inits all the UniqueFds.
+  void reset();
+  // Starts monitoring endpoints and pullup the gadget when
+  // the descriptors are written.
+  bool startMonitor();
+  // Waits for timeout_ms for gadget pull up to happen.
+  // Returns immediately if the gadget is already pulled up.
+  bool waitForPullUp(int timeout_ms);
+  // Adds the given fd to the watch list.
+  bool addInotifyFd(string fd);
+  // Adds the given endpoint to the watch list.
+  void addEndPoint(string ep);
+  // Registers the async callback from the caller to notify the caller
+  // when the gadget pull up happens.
+  void registerFunctionsAppliedCallback(void (*callback)(bool functionsApplied,
+                                                         void *(payload)),
+                                        void *payload);
+  bool isMonitorRunning();
+  // Ep monitoring and the gadget pull up logic.
+  static void *startMonitorFd(void *param);
 };
 
 //**************** Helper functions ************************//
