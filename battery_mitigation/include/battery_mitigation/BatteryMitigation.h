@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <utils/RefBase.h>
-
 #include "MitigationThermalManager.h"
 
 namespace android {

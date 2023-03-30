@@ -55,7 +55,7 @@ class PowerFiles {
     // Disallow copy and assign.
     PowerFiles(const PowerFiles &) = delete;
     void operator=(const PowerFiles &) = delete;
-    bool registerPowerRailsToWatch(const Json::Value &config);
+    bool registerPowerRailsToWatch(std::string_view config_path);
     // Update the power data from ODPM sysfs
     bool refreshPowerStatus(void);
     // Get power status map
