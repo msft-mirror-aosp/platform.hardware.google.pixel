@@ -90,32 +90,52 @@ class PowerHintSession : public BnPowerHintSession {
     int getUclampMin();
     void dumpToStream(std::ostream &stream);
 
-    time_point<steady_clock> getStaleTime();
+    // Disable any temporary boost and return to normal operation. It does not
+    // reset the actual uclamp value, and relies on the caller to do so, to
+    // prevent double-setting. Returns true if it actually disabled an active boost
+    bool disableTemporaryBoost();
 
   private:
-    class StaleTimerHandler : public MessageHandler {
+    class SessionTimerHandler : public MessageHandler {
       public:
-        StaleTimerHandler(PowerHintSession *session) : mSession(session), mIsSessionDead(false) {}
-        void updateTimer();
+        SessionTimerHandler(PowerHintSession *session, std::string name)
+            : mSession(session), mIsSessionDead(false), mName(name) {}
+        void updateTimer(nanoseconds delay);
         void handleMessage(const Message &message) override;
         void setSessionDead();
+        virtual void onTimeout() = 0;
 
-      private:
+      protected:
         PowerHintSession *mSession;
         std::mutex mClosedLock;
         std::mutex mMessageLock;
-        std::atomic<time_point<steady_clock>> mStaleTime;
+        std::atomic<time_point<steady_clock>> mTimeout;
         bool mIsSessionDead;
+        const std::string mName;
+    };
+
+    class StaleTimerHandler : public SessionTimerHandler {
+      public:
+        StaleTimerHandler(PowerHintSession *session) : SessionTimerHandler(session, "stale") {}
+        void updateTimer();
+        void onTimeout() override;
+    };
+
+    class BoostTimerHandler : public SessionTimerHandler {
+      public:
+        BoostTimerHandler(PowerHintSession *session) : SessionTimerHandler(session, "boost") {}
+        void onTimeout() override;
     };
 
   private:
     void updateUniveralBoostMode();
-    int setSessionUclampMin(int32_t min);
-    void setCpuLoadChangeHint(std::string hint);
+    int setSessionUclampMin(int32_t min, bool resetStale = true);
+    void tryToSendPowerHint(std::string hint);
     int64_t convertWorkDurationToBoostByPid(const std::vector<WorkDuration> &actualDurations);
     void traceSessionVal(char const *identifier, int64_t val) const;
     AppHintDesc *mDescriptor = nullptr;
     sp<StaleTimerHandler> mStaleTimerHandler;
+    sp<BoostTimerHandler> mBoostTimerHandler;
     std::atomic<time_point<steady_clock>> mLastUpdatedTime;
     sp<MessageHandler> mPowerManagerHandler;
     std::mutex mSessionLock;
@@ -123,8 +143,10 @@ class PowerHintSession : public BnPowerHintSession {
     std::string mIdString;
     // Used when setting a temporary boost value to hold the true boost
     std::atomic<std::optional<int>> mNextUclampMin;
-    // Are cpu load change related hints are supported
+    // To cache the status of whether ADPF hints are supported.
     std::unordered_map<std::string, std::optional<bool>> mSupportedHints;
+    // Last session hint sent, used for logging
+    int mLastHintSent = -1;
 };
 
 }  // namespace pixel

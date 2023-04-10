@@ -8,9 +8,9 @@ SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/common/system
 PRODUCT_PACKAGES += \
     misc_writer
 
-# Enable atrace hal and tools for pixel devices
+# Enable atrace categories and tools for pixel devices
 PRODUCT_PACKAGES += \
-    android.hardware.atrace@1.0-service.pixel \
+    atrace_categories.txt.pixel \
     dmabuf_dump
 
 # fastbootd
@@ -19,6 +19,10 @@ PRODUCT_PACKAGES += \
 
 # Common ramdump file type.
 BOARD_VENDOR_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/ramdump/common
+
+# Enable RKP support
+PRODUCT_PRODUCT_PROPERTIES += \
+    remote_provisioning.hostname=remoteprovisioning.googleapis.com
 
 # Pixel Experience
 
@@ -54,3 +58,7 @@ endif
 # Preopt SystemUI
 PRODUCT_DEXPREOPT_SPEED_APPS += \
     SystemUIGoogle
+
+# Virtual fingerprint HAL
+PRODUCT_PACKAGES_DEBUG += android.hardware.biometrics.fingerprint-service.example
+
