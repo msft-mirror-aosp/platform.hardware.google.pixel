@@ -132,7 +132,7 @@ PowerHintSession::PowerHintSession(int32_t tgid, int32_t uid, const std::vector<
     }
     PowerSessionManager::getInstance()->addPowerSession(this);
     // init boost
-    setSessionUclampMin(HintManager::GetInstance()->GetAdpfProfile()->mUclampMinInit);
+    sendHint(SessionHint::CPU_LOAD_RESET);
     ALOGV("PowerHintSession created: %s", mDescriptor->toString().c_str());
 }
 
@@ -174,7 +174,7 @@ void PowerHintSession::tryToSendPowerHint(std::string hint) {
     if (!mSupportedHints[hint].has_value()) {
         mSupportedHints[hint] = HintManager::GetInstance()->IsHintSupported(hint);
     }
-    if (mSupportedHints[hint]) {
+    if (mSupportedHints[hint].value()) {
         HintManager::GetInstance()->DoHint(hint);
     }
 }
@@ -202,7 +202,7 @@ int PowerHintSession::getUclampMin() {
 void PowerHintSession::dumpToStream(std::ostream &stream) {
     stream << "ID.Min.Act.Timeout(" << mIdString;
     stream << ", " << mDescriptor->current_min;
-    stream << ", " << mDescriptor->is_active;
+    stream << ", " << mDescriptor->is_active.load();
     stream << ", " << isTimeout() << ")";
 }
 
@@ -220,6 +220,7 @@ ndk::ScopedAStatus PowerHintSession::pause() {
         traceSessionVal("active", mDescriptor->is_active.load());
     }
     updateUniveralBoostMode();
+    PowerSessionManager::getInstance()->removeThreadsFromPowerSession(this);
     return ndk::ScopedAStatus::ok();
 }
 
@@ -231,6 +232,7 @@ ndk::ScopedAStatus PowerHintSession::resume() {
     if (mDescriptor->is_active.load())
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     mDescriptor->is_active.store(true);
+    PowerSessionManager::getInstance()->addThreadsFromPowerSession(this);
     // resume boost
     setSessionUclampMin(mDescriptor->current_min);
     if (ATRACE_ENABLED()) {

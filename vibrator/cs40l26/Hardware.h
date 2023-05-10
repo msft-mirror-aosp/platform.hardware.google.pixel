@@ -69,7 +69,7 @@ namespace vibrator {
 class HwApi : public Vibrator::HwApi, private HwApiBase {
   public:
     HwApi() {
-        initFF();
+        HwApi::initFF();
         open("calibration/f0_stored", &mF0);
         open("default/f0_offset", &mF0Offset);
         open("calibration/redc_stored", &mRedc);
@@ -95,6 +95,22 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     bool setF0CompEnable(bool value) override { return set(value, &mF0CompEnable); }
     bool setRedcCompEnable(bool value) override { return set(value, &mRedcCompEnable); }
     bool setMinOnOffInterval(uint32_t value) override { return set(value, &mMinOnOffInterval); }
+    uint32_t getContextScale() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.scale", 100);
+    }
+    bool getContextEnable() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.enable", false);
+    }
+    uint32_t getContextSettlingTime() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.settlingtime", 3000);
+    }
+    uint32_t getContextCooldownTime() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.cooldowntime", 1000);
+    }
+    bool getContextFadeEnable() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.fade", false);
+    }
+
     // TODO(b/234338136): Need to add the force feedback HW API test cases
     bool initFF() override {
         ATRACE_NAME(__func__);
@@ -165,6 +181,10 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
                 .code = FF_GAIN,
                 .value = value,
         };
+        if (value > 100) {
+            ALOGE("Invalid gain");
+            return false;
+        }
         if (write(mInputFd, (const void *)&gain, sizeof(gain)) != sizeof(gain)) {
             return false;
         }
@@ -172,6 +192,10 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     }
     bool setFFEffect(struct ff_effect *effect, uint16_t timeoutMs) override {
         ATRACE_NAME(StringPrintf("%s %dms", __func__, timeoutMs).c_str());
+        if (effect == nullptr) {
+            ALOGE("Invalid ff_effect");
+            return false;
+        }
         if (((*effect).replay.length != timeoutMs) || (ioctl(mInputFd, EVIOCSFF, effect) < 0)) {
             ALOGE("setFFEffect fail");
             return false;
@@ -249,17 +273,20 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         *haptic_pcm = NULL;
         return false;
     }
-    bool uploadOwtEffect(uint8_t *owtData, uint32_t numBytes, struct ff_effect *effect,
+    bool uploadOwtEffect(const uint8_t *owtData, const uint32_t numBytes, struct ff_effect *effect,
                          uint32_t *outEffectIndex, int *status) override {
         ATRACE_NAME(__func__);
-        (*effect).u.periodic.custom_len = numBytes / sizeof(uint16_t);
-        delete[] ((*effect).u.periodic.custom_data);
-        (*effect).u.periodic.custom_data = new int16_t[(*effect).u.periodic.custom_len]{0x0000};
-        if ((*effect).u.periodic.custom_data == nullptr) {
-            ALOGE("Failed to allocate memory for custom data\n");
+        if (owtData == nullptr || effect == nullptr || outEffectIndex == nullptr) {
+            ALOGE("Invalid argument owtData, ff_effect or outEffectIndex");
             *status = EX_NULL_POINTER;
             return false;
         }
+        if (status == nullptr) {
+            ALOGE("Invalid argument status");
+            return false;
+        }
+
+        (*effect).u.periodic.custom_len = numBytes / sizeof(uint16_t);
         memcpy((*effect).u.periodic.custom_data, owtData, numBytes);
 
         if ((*effect).id != -1) {
@@ -270,7 +297,6 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         (*effect).id = -1;
         if (ioctl(mInputFd, EVIOCSFF, effect) < 0) {
             ALOGE("Failed to upload effect %d (%d): %s", *outEffectIndex, errno, strerror(errno));
-            delete[] ((*effect).u.periodic.custom_data);
             *status = EX_ILLEGAL_STATE;
             return false;
         }
@@ -290,6 +316,10 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
 
         if (effectIndex < WAVEFORM_MAX_PHYSICAL_INDEX) {
             ALOGE("Invalid waveform index for OWT erase: %d", effectIndex);
+            return false;
+        }
+        if (effect == nullptr || (*effect).empty()) {
+            ALOGE("Invalid argument effect");
             return false;
         }
 
