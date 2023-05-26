@@ -69,7 +69,7 @@ class SysfsCollector {
         const char *const AmsRatePath;
         const std::vector<std::string> ThermalStatsPaths;
         const char *const CCARatePath;
-        const std::vector<std::string> TempResidencyPaths;
+        const std::vector<std::pair<std::string, std::string>> TempResidencyAndResetPaths;
         const char *const LongIRQMetricsPath;
         const char *const ResumeLatencyMetricsPath;
         const char *const ModemPcieLinkStatsPath;
@@ -100,6 +100,7 @@ class SysfsCollector {
     void logUFSLifetime(const std::shared_ptr<IStats> &stats_client);
     void logUFSErrorStats(const std::shared_ptr<IStats> &stats_client);
     void logF2fsStats(const std::shared_ptr<IStats> &stats_client);
+    void logF2fsAtomicWriteInfo(const std::shared_ptr<IStats> &stats_client);
     void logF2fsCompressionInfo(const std::shared_ptr<IStats> &stats_client);
     void logF2fsGcSegmentInfo(const std::shared_ptr<IStats> &stats_client);
     void logZramStats(const std::shared_ptr<IStats> &stats_client);
@@ -118,6 +119,7 @@ class SysfsCollector {
     void logVendorAudioHardwareStats(const std::shared_ptr<IStats> &stats_client);
     void logVendorLongIRQStatsReported(const std::shared_ptr<IStats> &stats_client);
     void logVendorResumeLatencyStats(const std::shared_ptr<IStats> &stats_client);
+    void logPartitionUsedSpace(const std::shared_ptr<IStats> &stats_client);
     void logPcieLinkStats(const std::shared_ptr<IStats> &stats_client);
 
     const char *const kSlowioReadCntPath;
@@ -149,7 +151,7 @@ class SysfsCollector {
     const char *const kAmsRatePath;
     const std::vector<std::string> kThermalStatsPaths;
     const char *const kCCARatePath;
-    const std::vector<std::string> kTempResidencyPaths;
+    const std::vector<std::pair<std::string, std::string>> kTempResidencyAndResetPaths;
     const char *const kLongIRQMetricsPath;
     const char *const kResumeLatencyMetricsPath;
     const char *const kModemPcieLinkStatsPath;
