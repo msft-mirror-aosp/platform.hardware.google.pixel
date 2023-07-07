@@ -46,7 +46,6 @@ namespace implementation {
 using ::android::sp;
 
 using NotificationCallback = std::function<void(const Temperature &t)>;
-using NotificationTime = std::chrono::time_point<std::chrono::steady_clock>;
 
 // Get thermal_zone type
 bool getThermalZoneTypeById(int tz_id, std::string *);
@@ -56,6 +55,12 @@ struct ThermalSample {
     boot_clock::time_point timestamp;
 };
 
+struct EmulSetting {
+    float emul_temp;
+    int emul_severity;
+    bool pending_update;
+};
+
 struct SensorStatus {
     ThrottlingSeverity severity;
     ThrottlingSeverity prev_hot_severity;
@@ -63,6 +68,7 @@ struct SensorStatus {
     ThrottlingSeverity prev_hint_severity;
     boot_clock::time_point last_update_time;
     ThermalSample thermal_cached;
+    std::unique_ptr<EmulSetting> emul_setting;
 };
 
 class ThermalHelper {
@@ -76,6 +82,9 @@ class ThermalHelper {
                                    std::vector<TemperatureThreshold> *thresholds) const;
     bool fillCurrentCoolingDevices(bool filterType, CoolingType type,
                                    std::vector<CoolingDevice> *coolingdevices) const;
+    bool emulTemp(std::string_view target_sensor, const float temp);
+    bool emulSeverity(std::string_view target_sensor, const int severity);
+    bool emulClear(std::string_view target_sensor);
 
     // Disallow copy and assign.
     ThermalHelper(const ThermalHelper &) = delete;
@@ -122,13 +131,13 @@ class ThermalHelper {
     }
 
     // Get Thermal Stats Sensor Map
-    const std::unordered_map<std::string, ThermalStats> GetSensorThermalStatsSnapshot() {
-        return thermal_stats_helper_.GetSensorThermalStatsSnapshot();
+    const std::unordered_map<std::string, SensorTempStats> GetSensorTempStatsSnapshot() {
+        return thermal_stats_helper_.GetSensorTempStatsSnapshot();
     }
     // Get Thermal Stats Sensor, Binded Cdev State Request Map
-    const std::unordered_map<std::string, std::unordered_map<std::string, ThermalStats>>
-    GetBindedCdevThermalStatsSnapshot() {
-        return thermal_stats_helper_.GetBindedCdevThermalStatsSnapshot();
+    const std::unordered_map<std::string, std::unordered_map<std::string, ThermalStats<int>>>
+    GetSensorCoolingDeviceRequestStatsSnapshot() {
+        return thermal_stats_helper_.GetSensorCoolingDeviceRequestStatsSnapshot();
     }
 
     void sendPowerExtHint(const Temperature &t);
@@ -176,7 +185,6 @@ class ThermalHelper {
             supported_powerhint_map_;
     PowerHalService power_hal_service_;
     ThermalStatsHelper thermal_stats_helper_;
-
     mutable std::shared_mutex sensor_status_map_mutex_;
     std::unordered_map<std::string, SensorStatus> sensor_status_map_;
 };

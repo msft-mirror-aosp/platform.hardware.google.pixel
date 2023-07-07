@@ -68,9 +68,30 @@ class Thermal : public BnThermal {
     void sendThermalChangedCallback(const Temperature &t);
 
   private:
+    class Looper {
+      public:
+        struct Event {
+            std::function<void()> handler;
+        };
+
+        Looper() {
+            thread_ = std::thread([&] { loop(); });
+        }
+        void addEvent(const Event &e);
+
+      private:
+        std::condition_variable cv_;
+        std::queue<Event> events_;
+        std::mutex mutex_;
+        std::thread thread_;
+
+        void loop();
+    };
+
     ThermalHelper thermal_helper_;
     std::mutex thermal_callback_mutex_;
     std::vector<CallbackSetting> callbacks_;
+    Looper looper_;
 
     ndk::ScopedAStatus getFilteredTemperatures(bool filterType, TemperatureType type,
                                                std::vector<Temperature> *_aidl_return);
@@ -86,7 +107,10 @@ class Thermal : public BnThermal {
     void dumpThrottlingInfo(std::ostringstream *dump_buf);
     void dumpThrottlingRequestStatus(std::ostringstream *dump_buf);
     void dumpPowerRailInfo(std::ostringstream *dump_buf);
+    void dumpStatsRecord(std::ostringstream *dump_buf, const StatsRecord &stats_record,
+                         std::string_view line_prefix);
     void dumpThermalStats(std::ostringstream *dump_buf);
+    void dumpThermalData(int fd);
 };
 
 }  // namespace implementation
