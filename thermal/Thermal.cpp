@@ -163,8 +163,6 @@ ndk::ScopedAStatus Thermal::unregisterThermalChangedCallback(
 ndk::ScopedAStatus Thermal::registerThermalChangedCallback(
         const std::shared_ptr<IThermalChangedCallback> &callback, bool filterType,
         TemperatureType type) {
-    std::vector<Temperature> temperatures;
-
     ATRACE_CALL();
     if (callback == nullptr) {
         return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
@@ -184,17 +182,21 @@ ndk::ScopedAStatus Thermal::registerThermalChangedCallback(
     LOG(INFO) << "a callback has been registered to ThermalHAL, isFilter: " << c.is_filter_type
               << " Type: " << toString(c.type);
     // Send notification right away after successful thermal callback registration
-    if (thermal_helper_.fillCurrentTemperatures(filterType, true, type, &temperatures)) {
-        for (const auto &t : temperatures) {
-            if (!filterType || t.type == type) {
-                LOG(INFO) << "Sending notification: "
-                          << " Type: " << toString(t.type) << " Name: " << t.name
-                          << " CurrentValue: " << t.value
-                          << " ThrottlingStatus: " << toString(t.throttlingStatus);
-                c.callback->notifyThrottling(t);
+    std::function<void()> handler = [this, c, filterType, type]() {
+        std::vector<Temperature> temperatures;
+        if (thermal_helper_.fillCurrentTemperatures(filterType, true, type, &temperatures)) {
+            for (const auto &t : temperatures) {
+                if (!filterType || t.type == type) {
+                    LOG(INFO) << "Sending notification: "
+                              << " Type: " << toString(t.type) << " Name: " << t.name
+                              << " CurrentValue: " << t.value
+                              << " ThrottlingStatus: " << toString(t.throttlingStatus);
+                    c.callback->notifyThrottling(t);
+                }
             }
         }
-    }
+    };
+    looper_.addEvent(Looper::Event{handler});
     return ndk::ScopedAStatus::ok();
 }
 
@@ -543,6 +545,10 @@ void Thermal::dumpThermalStats(std::ostringstream *dump_buf) {
     for (const auto &sensor_temp_stats_pair : sensor_temp_stats_map_) {
         *dump_buf << "  Sensor Name: " << sensor_temp_stats_pair.first << std::endl;
         const auto &sensor_temp_stats = sensor_temp_stats_pair.second;
+        *dump_buf << "   Max Temp: " << sensor_temp_stats.max_temp << ", TimeStamp: "
+                  << system_clock::to_time_t(sensor_temp_stats.max_temp_timestamp) << std::endl;
+        *dump_buf << "   Min Temp: " << sensor_temp_stats.min_temp << ", TimeStamp: "
+                  << system_clock::to_time_t(sensor_temp_stats.min_temp_timestamp) << std::endl;
         for (const auto &stats_by_threshold : sensor_temp_stats.stats_by_custom_threshold) {
             *dump_buf << "   Record by Threshold: [";
             for (const auto &threshold : stats_by_threshold.thresholds) {
@@ -742,7 +748,7 @@ void Thermal::dumpThermalData(int fd) {
 }
 
 binder_status_t Thermal::dump(int fd, const char **args, uint32_t numArgs) {
-    if (numArgs == 0) {
+    if (numArgs == 0 || std::string(args[0]) == "-a") {
         dumpThermalData(fd);
         return STATUS_OK;
     }
@@ -761,6 +767,23 @@ binder_status_t Thermal::dump(int fd, const char **args, uint32_t numArgs) {
                                                                                   : STATUS_OK;
     }
     return STATUS_BAD_VALUE;
+}
+
+void Thermal::Looper::addEvent(const Thermal::Looper::Event &e) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    events_.push(e);
+    cv_.notify_all();
+}
+
+void Thermal::Looper::loop() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [&] { return !events_.empty(); });
+        Event event = events_.front();
+        events_.pop();
+        lock.unlock();
+        event.handler();
+    }
 }
 
 }  // namespace implementation

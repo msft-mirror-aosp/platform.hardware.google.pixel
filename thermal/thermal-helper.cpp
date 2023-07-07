@@ -944,8 +944,8 @@ bool ThermalHelper::readThermalSensor(std::string_view sensor_name, float *temp,
         sensor_status.thermal_cached.temp = *temp;
         sensor_status.thermal_cached.timestamp = now;
     }
-
-    thermal_stats_helper_.updateSensorTempStatsByThreshold(sensor_name, *temp);
+    auto real_temp = (*temp) * sensor_info.multiplier;
+    thermal_stats_helper_.updateSensorTempStatsByThreshold(sensor_name, real_temp);
     return true;
 }
 
@@ -996,7 +996,6 @@ std::chrono::milliseconds ThermalHelper::thermalWatcherCallbackFunc(
         // Check if the sensor need to be updated
         if (sensor_status.last_update_time == boot_clock::time_point::min()) {
             force_update = true;
-            force_no_cache = true;
         } else {
             time_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - sensor_status.last_update_time);
@@ -1008,7 +1007,6 @@ std::chrono::milliseconds ThermalHelper::thermalWatcherCallbackFunc(
                                     sensor_info.virtual_sensor_info->trigger_sensors[i]) !=
                             uevent_sensors.end()) {
                             force_update = true;
-                            force_no_cache = true;
                             break;
                         }
                     }
