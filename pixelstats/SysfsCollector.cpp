@@ -29,6 +29,7 @@
 
 #include <mntent.h>
 #include <sys/timerfd.h>
+#include <sys/vfs.h>
 #include <cinttypes>
 #include <string>
 
@@ -49,10 +50,12 @@ using android::base::WriteStringToFile;
 using android::hardware::google::pixel::PixelAtoms::BatteryCapacity;
 using android::hardware::google::pixel::PixelAtoms::BlockStatsReported;
 using android::hardware::google::pixel::PixelAtoms::BootStatsInfo;
+using android::hardware::google::pixel::PixelAtoms::F2fsAtomicWriteInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsCompressionInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsGcSegmentInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsSmartIdleMaintEnabledStateChanged;
 using android::hardware::google::pixel::PixelAtoms::F2fsStatsInfo;
+using android::hardware::google::pixel::PixelAtoms::PartitionsUsedSpaceReported;
 using android::hardware::google::pixel::PixelAtoms::PcieLinkStatsReported;
 using android::hardware::google::pixel::PixelAtoms::StorageUfsHealth;
 using android::hardware::google::pixel::PixelAtoms::StorageUfsResetCount;
@@ -100,7 +103,7 @@ SysfsCollector::SysfsCollector(const struct SysfsPaths &sysfs_paths)
       kAmsRatePath(sysfs_paths.AmsRatePath),
       kThermalStatsPaths(sysfs_paths.ThermalStatsPaths),
       kCCARatePath(sysfs_paths.CCARatePath),
-      kTempResidencyPaths(sysfs_paths.TempResidencyPaths),
+      kTempResidencyAndResetPaths(sysfs_paths.TempResidencyAndResetPaths),
       kLongIRQMetricsPath(sysfs_paths.LongIRQMetricsPath),
       kResumeLatencyMetricsPath(sysfs_paths.ResumeLatencyMetricsPath),
       kModemPcieLinkStatsPath(sysfs_paths.ModemPcieLinkStatsPath),
@@ -621,6 +624,68 @@ void SysfsCollector::logF2fsStats(const std::shared_ptr<IStats> &stats_client) {
     }
 }
 
+void SysfsCollector::logF2fsAtomicWriteInfo(const std::shared_ptr<IStats> &stats_client) {
+    int peak_atomic_write, committed_atomic_block, revoked_atomic_block;
+
+    if (kF2fsStatsPath == nullptr) {
+        ALOGV("F2fs stats path not specified");
+        return;
+    }
+
+    std::string userdataBlock = getUserDataBlock();
+
+    std::string path = kF2fsStatsPath + (userdataBlock + "/peak_atomic_write");
+    if (!ReadFileToInt(path, &peak_atomic_write)) {
+        ALOGE("Unable to read peak_atomic_write");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    path = kF2fsStatsPath + (userdataBlock + "/committed_atomic_block");
+    if (!ReadFileToInt(path, &committed_atomic_block)) {
+        ALOGE("Unable to read committed_atomic_block");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    path = kF2fsStatsPath + (userdataBlock + "/revoked_atomic_block");
+    if (!ReadFileToInt(path, &revoked_atomic_block)) {
+        ALOGE("Unable to read revoked_atomic_block");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    // Load values array
+    std::vector<VendorAtomValue> values(3);
+    values[F2fsAtomicWriteInfo::kPeakAtomicWriteFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(peak_atomic_write);
+    values[F2fsAtomicWriteInfo::kCommittedAtomicBlockFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(committed_atomic_block);
+    values[F2fsAtomicWriteInfo::kRevokedAtomicBlockFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(revoked_atomic_block);
+
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kF2FsAtomicWriteInfo,
+                        .values = values};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk()) {
+        ALOGE("Unable to report F2fs Atomic Write info to Stats service");
+    }
+}
+
 void SysfsCollector::logF2fsCompressionInfo(const std::shared_ptr<IStats> &stats_client) {
     int compr_written_blocks, compr_saved_blocks, compr_new_inodes;
 
@@ -830,8 +895,10 @@ void SysfsCollector::logBlockStatsReported(const std::shared_ptr<IStats> &stats_
 }
 
 void SysfsCollector::logTempResidencyStats(const std::shared_ptr<IStats> &stats_client) {
-    for (int i = 0; i < kTempResidencyPaths.size(); i++) {
-        temp_residency_reporter_.logTempResidencyStats(stats_client, kTempResidencyPaths[i]);
+    for (const auto &temp_residency_and_reset_path : kTempResidencyAndResetPaths) {
+        temp_residency_reporter_.logTempResidencyStats(stats_client,
+                                                       temp_residency_and_reset_path.first,
+                                                       temp_residency_and_reset_path.second);
     }
 }
 
@@ -1297,6 +1364,35 @@ void SysfsCollector::logVendorLongIRQStatsReported(const std::shared_ptr<IStats>
         ALOGE("Unable to report kVendorLongIRQStatsReported to Stats service");
 }
 
+void SysfsCollector::logPartitionUsedSpace(const std::shared_ptr<IStats> &stats_client) {
+    struct statfs fs_info;
+    char path[] = "/mnt/vendor/persist";
+
+    if (statfs(path, &fs_info) == -1) {
+        ALOGE("statfs: %s", strerror(errno));
+        return;
+    }
+
+    // Load values array
+    std::vector<VendorAtomValue> values(3);
+    values[PartitionsUsedSpaceReported::kDirectoryFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>
+                        (PixelAtoms::PartitionsUsedSpaceReported::PERSIST);
+    values[PartitionsUsedSpaceReported::kFreeBytesFieldNumber - kVendorAtomOffset] =
+            VendorAtomValue::make<VendorAtomValue::longValue>(fs_info.f_bsize * fs_info.f_bfree);
+    values[PartitionsUsedSpaceReported::kTotalBytesFieldNumber - kVendorAtomOffset] =
+            VendorAtomValue::make<VendorAtomValue::longValue>(fs_info.f_bsize * fs_info.f_blocks);
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kPartitionUsedSpaceReported,
+                        .values = std::move(values)};
+
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk()) {
+        ALOGE("Unable to report Partitions Used Space Reported to stats service");
+    }
+}
+
 void SysfsCollector::logPcieLinkStats(const std::shared_ptr<IStats> &stats_client) {
     struct sysfs_map {
         const char *sysfs_path;
@@ -1324,12 +1420,16 @@ void SysfsCollector::logPcieLinkStats(const std::shared_ptr<IStats> &stats_clien
          PcieLinkStatsReported::kModemPcieLinkupFailuresFieldNumber,
          PcieLinkStatsReported::kWifiPcieLinkupFailuresFieldNumber},
 
+        {"link_recovery_failures", true, 0, 0,
+         PcieLinkStatsReported::kModemPcieLinkRecoveryFailuresFieldNumber,
+         PcieLinkStatsReported::kWifiPcieLinkRecoveryFailuresFieldNumber},
+
         {"pll_lock_average", false, 0, 0,
          PcieLinkStatsReported::kModemPciePllLockAvgFieldNumber,
          PcieLinkStatsReported::kWifiPciePllLockAvgFieldNumber},
 
         {"link_up_average", false, 0, 0,
-         PcieLinkStatsReported::kWifiPcieLinkUpAvgFieldNumber,
+         PcieLinkStatsReported::kModemPcieLinkUpAvgFieldNumber,
          PcieLinkStatsReported::kWifiPcieLinkUpAvgFieldNumber },
     };
 
@@ -1338,8 +1438,8 @@ void SysfsCollector::logPcieLinkStats(const std::shared_ptr<IStats> &stats_clien
         ALOGD("Modem PCIe stats path not specified");
     } else {
         for (i=0; i < ARRAY_SIZE(datamap); i++) {
-            std::string modempath = std::string (kModemPcieLinkStatsPath) + \
-                                    "/" + datamap[i].sysfs_path;
+            std::string modempath =
+                    std::string(kModemPcieLinkStatsPath) + "/" + datamap[i].sysfs_path;
 
             if (ReadFileToInt(modempath, &(datamap[i].modem_val))) {
                 reportPcieLinkStats = true;
@@ -1361,8 +1461,8 @@ void SysfsCollector::logPcieLinkStats(const std::shared_ptr<IStats> &stats_clien
         ALOGD("Wifi PCIe stats path not specified");
     } else {
         for (i=0; i < ARRAY_SIZE(datamap); i++) {
-            std::string wifipath = std::string (kWifiPcieLinkStatsPath) + \
-                                   "/" + datamap[i].sysfs_path;
+            std::string wifipath =
+                    std::string(kWifiPcieLinkStatsPath) + "/" + datamap[i].sysfs_path;
 
             if (ReadFileToInt(wifipath, &(datamap[i].wifi_val))) {
                 reportPcieLinkStats = true;
@@ -1428,6 +1528,7 @@ void SysfsCollector::logPerDay() {
     logCodec1Failed(stats_client);
     logCodecFailed(stats_client);
     logF2fsStats(stats_client);
+    logF2fsAtomicWriteInfo(stats_client);
     logF2fsCompressionInfo(stats_client);
     logF2fsGcSegmentInfo(stats_client);
     logF2fsSmartIdleMaintEnabled(stats_client);
@@ -1444,6 +1545,7 @@ void SysfsCollector::logPerDay() {
     logTempResidencyStats(stats_client);
     logVendorLongIRQStatsReported(stats_client);
     logVendorResumeLatencyStats(stats_client);
+    logPartitionUsedSpace(stats_client);
     logPcieLinkStats(stats_client);
 }
 
