@@ -910,7 +910,6 @@ float ThermalHelperImpl::runVirtualTempEstimator(std::string_view sensor_name,
                                                  std::map<std::string, float> *sensor_log_map) {
     std::vector<float> model_inputs;
     float estimated_vt = NAN;
-    constexpr int kCelsius2mC = 1000;
 
     ATRACE_NAME(StringPrintf("ThermalHelper::runVirtualTempEstimator - %s", sensor_name.data())
                         .c_str());
@@ -933,7 +932,7 @@ float ThermalHelperImpl::runVirtualTempEstimator(std::string_view sensor_name,
 
         if ((*sensor_log_map).count(linked_sensor.data())) {
             float value = (*sensor_log_map)[linked_sensor.data()];
-            model_inputs.push_back(value / kCelsius2mC);
+            model_inputs.push_back(value);
         } else {
             LOG(ERROR) << "failed to read sensor: " << linked_sensor;
             return NAN;
@@ -947,7 +946,7 @@ float ThermalHelperImpl::runVirtualTempEstimator(std::string_view sensor_name,
         return NAN;
     }
 
-    return (estimated_vt * kCelsius2mC);
+    return estimated_vt;
 }
 
 constexpr int kTranTimeoutParam = 2;
@@ -1017,7 +1016,8 @@ bool ThermalHelperImpl::readThermalSensor(std::string_view sensor_name, float *t
             }
         }
 
-        if (sensor_info.virtual_sensor_info->formula == FormulaOption::USE_ML_MODEL) {
+        if ((sensor_info.virtual_sensor_info->formula == FormulaOption::USE_ML_MODEL) ||
+            (sensor_info.virtual_sensor_info->formula == FormulaOption::USE_LINEAR_MODEL)) {
             *temp = runVirtualTempEstimator(sensor_name, sensor_log_map);
 
             if (std::isnan(*temp)) {
