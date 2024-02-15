@@ -4,10 +4,6 @@ PRODUCT_COPY_FILES += \
 BOARD_VENDOR_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/common/vendor
 SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/common/system_ext
 
-# Write flags to the vendor space in /misc partition.
-PRODUCT_PACKAGES += \
-    misc_writer
-
 # Enable atrace categories and tools for pixel devices
 PRODUCT_PACKAGES += \
     atrace_categories.txt.pixel \
@@ -59,5 +55,10 @@ PRODUCT_PROPERTY_OVERRIDES += \
     dalvik.vm.systemuicompilerfilter=speed
 
 # Virtual fingerprint HAL
-PRODUCT_PACKAGES_DEBUG += android.hardware.biometrics.fingerprint-service.example
+PRODUCT_PACKAGES_DEBUG += com.android.hardware.biometrics.fingerprint.virtual
+
+# Virtual face HAL
+ifeq ($(RELEASE_AIDL_USE_UNFROZEN), true)
+PRODUCT_PACKAGES_DEBUG += com.android.hardware.biometrics.face.virtual
+endif
 

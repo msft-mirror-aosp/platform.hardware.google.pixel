@@ -117,6 +117,8 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             tmp[12] = pca_rs[4];
             tmp[14] = pca_rs[1];
             if (wline_at.empty()) {
+                /* force adapter type to PPS when pca log is available, but not wlc */
+                tmp[0] = PixelAtoms::ChargeStats::ADAPTER_TYPE_USB_PD_PPS;
                 tmp[8] = pca_ac[0];
                 tmp[9] = pca_ac[1];
                 tmp[13] = pca_rs[0];
@@ -232,12 +234,9 @@ bool ChargeStatsReporter::shouldReportEvent(void) {
 void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_client,
                                          const std::string &path) {
     std::string file_contents, line, wfile_contents, wline_at, wline_ac, pca_file_contents,
-            pca_line, thermal_file_contents, gcharger_file_contents;
+            pca_line, thermal_file_contents, gcharger_file_contents, gdbatt_file_contents;
     std::istringstream ss;
-    bool has_wireless = wireless_charge_stats_.CheckWirelessContentsAndAck(&wfile_contents);
-    bool has_pca = pca_charge_stats_.CheckPcaContentsAndAck(&pca_file_contents);
-    bool has_thermal = checkContentsAndAck(&thermal_file_contents, kThermalChargeMetricsPath);
-    bool has_gcharger = checkContentsAndAck(&gcharger_file_contents, kGChargerMetricsPath);
+    bool has_wireless, has_pca, has_thermal, has_gcharger, has_dual_batt;
 
     if (!ReadFileToString(path.c_str(), &file_contents)) {
         ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
@@ -260,6 +259,7 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         return;
     }
 
+    has_pca = pca_charge_stats_.CheckPcaContentsAndAck(&pca_file_contents);
     if (has_pca) {
         std::istringstream pca_ss;
 
@@ -267,6 +267,7 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         std::getline(pca_ss, pca_line);
     }
 
+    has_wireless = wireless_charge_stats_.CheckWirelessContentsAndAck(&wfile_contents);
     if (has_wireless) {
         std::istringstream wss;
 
@@ -285,6 +286,7 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         ReportVoltageTierStats(stats_client, line.c_str(), has_wireless, wfile_contents);
     }
 
+    has_thermal = checkContentsAndAck(&thermal_file_contents, kThermalChargeMetricsPath);
     if (has_thermal) {
         std::istringstream wss;
         wss.str(thermal_file_contents);
@@ -293,9 +295,19 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         }
     }
 
+    has_gcharger = checkContentsAndAck(&gcharger_file_contents, kGChargerMetricsPath);
     if (has_gcharger) {
         std::istringstream wss;
         wss.str(gcharger_file_contents);
+        while (std::getline(wss, line)) {
+            ReportVoltageTierStats(stats_client, line.c_str());
+        }
+    }
+
+    has_dual_batt = checkContentsAndAck(&gdbatt_file_contents, kGDualBattMetricsPath);
+    if (has_dual_batt) {
+        std::istringstream wss;
+        wss.str(gdbatt_file_contents);
         while (std::getline(wss, line)) {
             ReportVoltageTierStats(stats_client, line.c_str());
         }

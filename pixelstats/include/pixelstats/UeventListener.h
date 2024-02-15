@@ -28,7 +28,6 @@ namespace google {
 namespace pixel {
 
 using aidl::android::frameworks::stats::IStats;
-
 /**
  * A class to listen for uevents and report reliability events to
  * the PixelStats HAL.
@@ -47,6 +46,7 @@ class UeventListener {
         const char *const TypeCPartnerPidPath;
         const char *const WirelessChargerPtmcUevent;  // Deprecated.
         const char *const WirelessChargerPtmcPath;    // Deprecated.
+        const char *const GMSRPath;
     };
     constexpr static const char *const ssoc_details_path =
             "/sys/class/power_supply/battery/ssoc_details";
@@ -59,6 +59,7 @@ class UeventListener {
     constexpr static const char *const typec_partner_pid_path_default =
             "/sys/class/typec/port0-partner/identity/product";
     constexpr static const char *const typec_partner_uevent_default = "DEVTYPE=typec_partner";
+    constexpr static const char *const gmsr_path = "";
 
     UeventListener(const std::string audio_uevent, const std::string ssoc_details_path = "",
                    const std::string overheat_path = overheat_path_default,
@@ -88,7 +89,11 @@ class UeventListener {
     void ReportBatteryCapacityFGEvent(const std::shared_ptr<IStats> &stats_client,
                                       const char *subsystem);
     void ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_client);
-
+    void ReportGpuEvent(const std::shared_ptr<IStats> &stats_client, const char *driver,
+                        const char *gpu_event_type, const char *gpu_event_info);
+    void ReportThermalAbnormalEvent(const std::shared_ptr<IStats> &stats_client,
+                                    const char *devpath, const char *thermal_abnormal_event_type,
+                                    const char *thermal_abnormal_event_info);
     const std::string kAudioUevent;
     const std::string kBatterySSOCPath;
     const std::string kUsbPortOverheatPath;
@@ -96,6 +101,87 @@ class UeventListener {
     const std::string kTypeCPartnerUevent;
     const std::string kTypeCPartnerVidPath;
     const std::string kTypeCPartnerPidPath;
+    const std::string kBatteryGMSRPath;
+
+    const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventType>
+            kGpuEventTypeStrToEnum{
+                    {"KMD_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventType::GpuEvent_GpuEventType_MALI_KMD_ERROR},
+                    {"GPU_RESET",
+                     PixelAtoms::GpuEvent::GpuEventType::GpuEvent_GpuEventType_MALI_GPU_RESET}};
+
+    const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventInfo>
+            kGpuEventInfoStrToEnum{
+                    {"CSG_REQ_STATUS_UPDATE",
+                     PixelAtoms::GpuEvent::GpuEventInfo::
+                             GpuEvent_GpuEventInfo_MALI_CSG_REQ_STATUS_UPDATE},
+                    {"CSG_SUSPEND",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CSG_SUSPEND},
+                    {"CSG_SLOTS_SUSPEND", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                  GpuEvent_GpuEventInfo_MALI_CSG_SLOTS_SUSPEND},
+                    {"CSG_GROUP_SUSPEND", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                  GpuEvent_GpuEventInfo_MALI_CSG_GROUP_SUSPEND},
+                    {"CSG_EP_CFG",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CSG_EP_CFG},
+                    {"CSG_SLOTS_START", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                GpuEvent_GpuEventInfo_MALI_CSG_SLOTS_START},
+                    {"GROUP_TERM",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_GROUP_TERM},
+                    {"QUEUE_START",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_QUEUE_START},
+                    {"QUEUE_STOP",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_QUEUE_STOP},
+                    {"QUEUE_STOP_ACK",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_QUEUE_STOP_ACK},
+                    {"CSG_SLOT_READY",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CSG_SLOT_READY},
+                    {"L2_PM_TIMEOUT",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_L2_PM_TIMEOUT},
+                    {"PM_TIMEOUT",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_PM_TIMEOUT},
+                    {"CSF_RESET_OK",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CSF_RESET_OK},
+                    {"CSF_RESET_FAILED", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                 GpuEvent_GpuEventInfo_MALI_CSF_RESET_FAILED},
+                    {"TILER_OOM",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_TILER_OOM},
+                    {"PROGRESS_TIMER",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_PROGRESS_TIMER},
+                    {"CS_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CS_ERROR},
+                    {"FW_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_FW_ERROR},
+                    {"PMODE_EXIT_TIMEOUT", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                   GpuEvent_GpuEventInfo_MALI_PMODE_EXIT_TIMEOUT},
+                    {"PMODE_ENTRY_FAILURE", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                    GpuEvent_GpuEventInfo_MALI_PMODE_ENTRY_FAILURE},
+                    {"GPU_PAGE_FAULT",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_GPU_PAGE_FAULT},
+                    {"MMU_AS_ACTIVE_STUCK",
+                     PixelAtoms::GpuEvent::GpuEventInfo::
+                             GpuEvent_GpuEventInfo_MALI_MMU_AS_ACTIVE_STUCK}};
+
+    const std::unordered_map<std::string,
+                             PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType>
+            kThermalAbnormalityTypeStrToEnum{
+                    {"UNKNOWN", PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                                        ThermalSensorAbnormalityDetected_AbnormalityType_UNKNOWN},
+                    {"SENSOR_STUCK",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_SENSOR_STUCK},
+                    {"EXTREME_HIGH_TEMP",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_EXTREME_HIGH_TEMP},
+                    {"EXTREME_LOW_TEMP",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_EXTREME_LOW_TEMP},
+                    {"HIGH_RISING_SPEED",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_HIGH_RISING_SPEED},
+                    {"TEMP_READ_FAIL",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_TEMP_READ_FAIL},
+            };
 
     BatteryCapacityReporter battery_capacity_reporter_;
     ChargeStatsReporter charge_stats_reporter_;

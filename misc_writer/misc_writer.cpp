@@ -16,12 +16,12 @@
 
 #include "misc_writer/misc_writer.h"
 
-#include <string.h>
-
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <bootloader_message/bootloader_message.h>
+#include <string.h>
 
 namespace android {
 namespace hardware {
@@ -93,6 +93,18 @@ bool MiscWriter::PerformAction(std::optional<size_t> override_offset) {
                           ? std::string(kMaxRamSize).append(stringdata_).append("\n")
                           : std::string(32, 0);
         break;
+    case MiscWriterActions::kWriteTimeRtcOffset:
+        offset = override_offset.value_or(kRTimeRtcOffsetValOffsetInVendorSpace);
+        content = std::string(kTimeRtcOffset) + stringdata_;
+        content.resize(32);
+        break;
+    case MiscWriterActions::kWriteTimeMinRtc:
+        offset = override_offset.value_or(kRTimeMinRtcValOffsetInVendorSpace);
+        content = std::string(kTimeMinRtc) + stringdata_;
+        content.resize(32);
+        break;
+    case MiscWriterActions::kSetSotaConfig:
+        goto sota_config;
     case MiscWriterActions::kUnset:
       LOG(ERROR) << "The misc writer action must be set";
       return false;
@@ -103,6 +115,29 @@ bool MiscWriter::PerformAction(std::optional<size_t> override_offset) {
     LOG(ERROR) << "Failed to write " << content << " at offset " << offset << " : " << err;
     return false;
   }
+
+sota_config:
+  if (action_ == MiscWriterActions::kSetSotaFlag || action_ == MiscWriterActions::kSetSotaConfig) {
+    content = ::android::base::GetProperty("persist.vendor.nfc.factoryota.state", "");
+    if (content.size() != 0 && content.size() <= 40) {
+      offset = kSotaStateOffsetInVendorSpace;
+      if (std::string err;
+          !WriteMiscPartitionVendorSpace(content.data(), content.size(), offset, &err)) {
+          LOG(ERROR) << "Failed to write " << content << " at offset " << offset << " : " << err;
+          return false;
+      }
+    }
+    content = ::android::base::GetProperty("persist.vendor.nfc.factoryota.schedule_shipmode", "");
+    if (content.size() != 0 && content.size() <= 32) {
+      offset = kSotaScheduleShipmodeOffsetInVendorSpace;
+      if (std::string err;
+          !WriteMiscPartitionVendorSpace(content.data(), content.size(), offset, &err)) {
+          LOG(ERROR) << "Failed to write " << content << " at offset " << offset << " : " << err;
+          return false;
+      }
+    }
+  }
+
   return true;
 }
 
