@@ -25,6 +25,7 @@ option java_package = "android.hardware.google.pixel";
 option java_outer_classname = "PixelAtoms";
 
 import "frameworks/proto_logging/stats/atom_field_options.proto";
+import "frameworks/proto_logging/stats/enums/app/enums.proto";
 
 /*
  * Please note that the following features are not currently supported by
@@ -623,8 +624,8 @@ message PixelMmMetricsPerHour {
     optional int32 psi_mem_some_avg300_avg = 60;
     optional int32 version = 61 [deprecated = true];
     optional int64 shmem_pages = 62;
-    optional int64 page_tables_pages = 63;
-    optional int64 dmabuf_pages = 64;
+    optional int64 page_table_pages = 63;
+    optional int64 dmabuf_kb = 64;
 }
 
 /* A message containing Pixel memory metrics collected daily. */
@@ -953,6 +954,10 @@ message PowerMitigationStats {
  optional int32 soft_ocp_gpu_cap = 24;
  // The last triggered capacity: soft_ocp_tpu.
  optional int32 soft_ocp_tpu_cap = 25;
+ // The last triggered count: batoilo2.
+ optional int32 batoilo2_count = 26;
+ // The last triggered capacity: batoilo2.
+ optional int32 batoilo2_cap = 27;
 }
 
 /**
@@ -1654,6 +1659,16 @@ message BrownoutDetected {
     optional int32 evt_cnt_oilo1 = 42;
     // event counter oilo2
     optional int32 evt_cnt_oilo2 = 43;
+    // VIMON vbatt
+    optional int32 vimon_vbatt = 44;
+    // VIMON ibatt
+    optional int32 vimon_ibatt = 45;
+    // Mitigation Method 0
+    optional int32 mitigation_method_0 = 46;
+    // Mitigation Method 0 Entry Count
+    optional int32 mitigation_method_0_count = 47;
+    // Mitigation Method 0 Entry Time
+    optional int64 mitigation_method_0_time_us = 48;
 }
 
 /*
@@ -2161,6 +2176,12 @@ message PixelImpulseUsageReported {
       /* Client side */
       API_SERVER_START = 1001;
       API_PIXEL_STATE_CHANGE = 1002;
+      /* Internal */
+      INTERNAL_PLATFORM_CONNECTION_CONNECT = 10001;
+      INTERNAL_PLATFORM_CONNECTION_DISCONNECT = 10002;
+      INTERNAL_PLATFORM_CONNECTION_CHANGE = 10003;
+      INTERNAL_CLIENT_LISTENER_ADD = 10004;
+      INTERNAL_CLIENT_LISTENER_REMOVE = 10005;
   }
   /* Invoked API name */
   optional ApiName api_name = 4;
@@ -2196,6 +2217,34 @@ message PixelImpulseUsageReported {
 
   /* Size of the arguments */
   optional int32 request_size = 11;
+
+  /* Platform connection usage */
+  /* Used when api_name == INTERNAL_PLATFORM_CONNECTION_CHANGE */
+  optional int32 internal_platform_connection_count = 12;
+
+  /* Client state source usage */
+  /* Used when api_name == INTERNAL_CLIENT_LISTENER_* */
+  optional int32 internal_client_listener_count = 13;
+
+  enum StateSource {
+      STATE_SOURCE_UNKNOWN = 0;
+      STATE_SOURCE_UID_IMPORTANCE = 1;
+      STATE_SOURCE_CAMERA_AVAILABILITY = 2;
+      STATE_SOURCE_DROPBOX_BROADCAST = 3;
+      STATE_SOURCE_TEMPERATURE = 4;
+      STATE_SOURCE_THERMAL_STATUS = 5;
+  }
+  /* State source involved */
+  /* Used when api_name == INTERNAL_PLATFORM_CONNECTION_* or
+   * api_name == INTERNAL_CLIENT_LISTENER_* */
+  optional StateSource state_source = 14;
+
+  /* UID importance cut point */
+  /* This is the UID importance cutpoint associated with the
+   * OnUidImportanceListener
+   */
+  /* Used when state_source == STATE_SOURCE_UID_IMPORTANCE */
+  optional android.app.Importance uid_importance_cut_point = 15;
 }
 
 /**

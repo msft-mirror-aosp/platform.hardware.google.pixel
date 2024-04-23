@@ -13,13 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define ATRACE_TAG (ATRACE_TAG_THERMAL | ATRACE_TAG_HAL)
+
 #include "virtualtemp_estimator.h"
 
 #include <android-base/logging.h>
+#include <android-base/stringprintf.h>
 #include <dlfcn.h>
 #include <json/reader.h>
+#include <utils/Trace.h>
 
 #include <cmath>
+#include <sstream>
 #include <vector>
 
 namespace thermal {
@@ -72,6 +77,49 @@ float CalculateOffset(const std::vector<float> &offset_thresholds,
 }
 }  // namespace
 
+VtEstimatorStatus VirtualTempEstimator::DumpTraces() {
+    if (type != kUseMLModel) {
+        return kVtEstimatorUnSupported;
+    }
+
+    if (tflite_instance_ == nullptr || common_instance_ == nullptr) {
+        LOG(ERROR) << "tflite_instance_ or common_instance_ is nullptr during DumpTraces\n";
+        return kVtEstimatorInitFailed;
+    }
+
+    std::unique_lock<std::mutex> lock(tflite_instance_->tflite_methods.mutex);
+
+    if (!common_instance_->is_initialized) {
+        LOG(ERROR) << "tflite_instance_ not initialized for " << tflite_instance_->model_path;
+        return kVtEstimatorInitFailed;
+    }
+
+    // get model input/output buffers
+    float *model_input = tflite_instance_->input_buffer;
+    float *model_output = tflite_instance_->output_buffer;
+    auto input_buffer_size = tflite_instance_->input_buffer_size;
+    auto output_buffer_size = tflite_instance_->output_buffer_size;
+
+    // In Case of use_prev_samples, inputs are available in order in scratch buffer
+    if (common_instance_->use_prev_samples) {
+        model_input = tflite_instance_->scratch_buffer;
+    }
+
+    // Add traces for model input/output buffers
+    std::string sensor_name = common_instance_->sensor_name;
+    for (size_t i = 0; i < input_buffer_size; ++i) {
+        ATRACE_INT((sensor_name + "_input_" + std::to_string(i)).c_str(),
+                   static_cast<int>(model_input[i]));
+    }
+
+    for (size_t i = 0; i < output_buffer_size; ++i) {
+        ATRACE_INT((sensor_name + "_output_" + std::to_string(i)).c_str(),
+                   static_cast<int>(model_output[i]));
+    }
+
+    return kVtEstimatorOk;
+}
+
 void VirtualTempEstimator::LoadTFLiteWrapper() {
     if (!tflite_instance_) {
         LOG(ERROR) << "tflite_instance_ is nullptr during LoadTFLiteWrapper";
@@ -87,50 +135,52 @@ void VirtualTempEstimator::LoadTFLiteWrapper() {
     }
 
     tflite_instance_->tflite_methods.create =
-            reinterpret_cast<tflitewrapper_create>(dlsym(mLibHandle, "Create"));
+            reinterpret_cast<tflitewrapper_create>(dlsym(mLibHandle, "ThermalTfliteCreate"));
     if (!tflite_instance_->tflite_methods.create) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_create with error: " << dlerror();
     }
 
     tflite_instance_->tflite_methods.init =
-            reinterpret_cast<tflitewrapper_init>(dlsym(mLibHandle, "Init"));
+            reinterpret_cast<tflitewrapper_init>(dlsym(mLibHandle, "ThermalTfliteInit"));
     if (!tflite_instance_->tflite_methods.init) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_init with error: " << dlerror();
     }
 
     tflite_instance_->tflite_methods.invoke =
-            reinterpret_cast<tflitewrapper_invoke>(dlsym(mLibHandle, "Invoke"));
+            reinterpret_cast<tflitewrapper_invoke>(dlsym(mLibHandle, "ThermalTfliteInvoke"));
     if (!tflite_instance_->tflite_methods.invoke) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_invoke with error: " << dlerror();
     }
 
     tflite_instance_->tflite_methods.destroy =
-            reinterpret_cast<tflitewrapper_destroy>(dlsym(mLibHandle, "Destroy"));
+            reinterpret_cast<tflitewrapper_destroy>(dlsym(mLibHandle, "ThermalTfliteDestroy"));
     if (!tflite_instance_->tflite_methods.destroy) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_destroy with error: " << dlerror();
     }
 
     tflite_instance_->tflite_methods.get_input_config_size =
             reinterpret_cast<tflitewrapper_get_input_config_size>(
-                    dlsym(mLibHandle, "GetInputConfigSize"));
+                    dlsym(mLibHandle, "ThermalTfliteGetInputConfigSize"));
     if (!tflite_instance_->tflite_methods.get_input_config_size) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_get_input_config_size with error: "
                    << dlerror();
     }
 
     tflite_instance_->tflite_methods.get_input_config =
-            reinterpret_cast<tflitewrapper_get_input_config>(dlsym(mLibHandle, "GetInputConfig"));
+            reinterpret_cast<tflitewrapper_get_input_config>(
+                    dlsym(mLibHandle, "ThermalTfliteGetInputConfig"));
     if (!tflite_instance_->tflite_methods.get_input_config) {
         LOG(ERROR) << "Could not link and cast tflitewrapper_get_input_config with error: "
                    << dlerror();
     }
 }
 
-VirtualTempEstimator::VirtualTempEstimator(VtEstimationType estimationType,
+VirtualTempEstimator::VirtualTempEstimator(std::string_view sensor_name,
+                                           VtEstimationType estimationType,
                                            size_t num_linked_sensors) {
     type = estimationType;
 
-    common_instance_ = std::make_unique<VtEstimatorCommonData>(num_linked_sensors);
+    common_instance_ = std::make_unique<VtEstimatorCommonData>(sensor_name, num_linked_sensors);
     if (estimationType == kUseMLModel) {
         tflite_instance_ = std::make_unique<VtEstimatorTFLiteData>();
         LoadTFLiteWrapper();
@@ -222,6 +272,7 @@ VtEstimatorStatus VirtualTempEstimator::TFliteInitialize(MLModelInitData data) {
 
     common_instance_->use_prev_samples = data.use_prev_samples;
     common_instance_->prev_samples_order = prev_samples_order;
+    tflite_instance_->support_under_sampling = data.support_under_sampling;
     tflite_instance_->input_buffer_size = num_linked_sensors * prev_samples_order;
     tflite_instance_->input_buffer = new float[tflite_instance_->input_buffer_size];
     if (common_instance_->use_prev_samples) {
@@ -270,6 +321,17 @@ VtEstimatorStatus VirtualTempEstimator::TFliteInitialize(MLModelInitData data) {
             return kVtEstimatorInitFailed;
         }
 
+        if (!input_config["ModelConfig"].empty() &&
+            !input_config["ModelConfig"]["sample_interval_ms"].empty()) {
+            // read input sample interval and determine predict window
+            size_t sample_interval_ms = input_config["ModelConfig"]["sample_interval_ms"].asInt(),
+                   predict_window_ms = sample_interval_ms * (output_label_count - 1);
+            tflite_instance_->sample_interval = std::chrono::milliseconds{sample_interval_ms};
+            tflite_instance_->predict_window_ms = predict_window_ms;
+            LOG(INFO) << "Parsed tflite model input sample interval: " << sample_interval_ms
+                      << " ms, max prediction window size: " << predict_window_ms << " ms";
+        }
+
         Json::Value input_data = input_config["InputData"];
         if (input_data.size() != num_linked_sensors) {
             LOG(ERROR) << "Tflite model input data size [" << input_data.size()
@@ -301,7 +363,7 @@ VtEstimatorStatus VirtualTempEstimator::TFliteInitialize(MLModelInitData data) {
 }
 
 VtEstimatorStatus VirtualTempEstimator::LinearModelEstimate(const std::vector<float> &thermistors,
-                                                            float *output) {
+                                                            std::vector<float> *output) {
     if (linear_model_instance_ == nullptr || common_instance_ == nullptr) {
         LOG(ERROR) << "linear_model_instance_ or common_instance_ is nullptr during Initialize";
         return kVtEstimatorInitFailed;
@@ -354,12 +416,13 @@ VtEstimatorStatus VirtualTempEstimator::LinearModelEstimate(const std::vector<fl
     estimated_value += CalculateOffset(common_instance_->offset_thresholds,
                                        common_instance_->offset_values, estimated_value);
 
-    *output = estimated_value;
+    std::vector<float> data = {estimated_value};
+    *output = data;
     return kVtEstimatorOk;
 }
 
 VtEstimatorStatus VirtualTempEstimator::TFliteEstimate(const std::vector<float> &thermistors,
-                                                       float *output) {
+                                                       std::vector<float> *output) {
     if (tflite_instance_ == nullptr || common_instance_ == nullptr) {
         LOG(ERROR) << "tflite_instance_ or common_instance_ is nullptr during Estimate\n";
         return kVtEstimatorInitFailed;
@@ -373,12 +436,20 @@ VtEstimatorStatus VirtualTempEstimator::TFliteEstimate(const std::vector<float> 
     }
 
     size_t num_linked_sensors = common_instance_->num_linked_sensors;
-    if ((thermistors.size() != num_linked_sensors) || (!output)) {
+    if ((thermistors.size() != num_linked_sensors) || (output == nullptr)) {
         LOG(ERROR) << "Invalid args for " << tflite_instance_->model_path
                    << " thermistors.size(): " << thermistors.size()
                    << " num_linked_sensors: " << num_linked_sensors << " output: " << output;
         return kVtEstimatorInvalidArgs;
     }
+
+    // log input data
+    std::string input_data_str = "model_input: [";
+    for (size_t i = 0; i < num_linked_sensors; ++i) {
+        input_data_str += ::android::base::StringPrintf("%0.2f ", thermistors[i]);
+    }
+    input_data_str += "]";
+    LOG(INFO) << input_data_str;
 
     // copy input data into input tensors
     size_t prev_samples_order = common_instance_->prev_samples_order;
@@ -396,11 +467,19 @@ VtEstimatorStatus VirtualTempEstimator::TFliteEstimate(const std::vector<float> 
             }
         }
         tflite_instance_->input_buffer[sample_start_index + i] = thermistors[i];
+        if (cur_sample_index == 0 && tflite_instance_->support_under_sampling) {
+            // fill previous samples if support under sampling
+            for (size_t j = 1; j < prev_samples_order; ++j) {
+                size_t copy_start_index = j * num_linked_sensors;
+                tflite_instance_->input_buffer[copy_start_index + i] = thermistors[i];
+            }
+        }
     }
 
     // Update sample count
     common_instance_->cur_sample_count++;
-    if (common_instance_->cur_sample_count < prev_samples_order) {
+    if ((common_instance_->cur_sample_count < prev_samples_order) &&
+        !(tflite_instance_->support_under_sampling)) {
         return kVtEstimatorUnderSampling;
     }
 
@@ -427,18 +506,30 @@ VtEstimatorStatus VirtualTempEstimator::TFliteEstimate(const std::vector<float> 
                    << ")";
         return kVtEstimatorInvokeFailed;
     }
+    tflite_instance_->last_update_time = boot_clock::now();
 
-    // add offset to predicted value
-    float predicted_value = tflite_instance_->output_buffer[0];
-    predicted_value += CalculateOffset(common_instance_->offset_thresholds,
-                                       common_instance_->offset_values, predicted_value);
+    // prepare output
+    std::vector<float> data;
+    std::ostringstream model_out_log, predict_log;
+    data.reserve(output_buffer_size);
+    for (size_t i = 0; i < output_buffer_size; ++i) {
+        // add offset to predicted value
+        float predicted_value = tflite_instance_->output_buffer[i];
+        model_out_log << predicted_value << " ";
+        predicted_value += CalculateOffset(common_instance_->offset_thresholds,
+                                           common_instance_->offset_values, predicted_value);
+        predict_log << predicted_value << " ";
+        data.emplace_back(predicted_value);
+    }
+    LOG(INFO) << "model_output: [" << model_out_log.str() << "]";
+    LOG(INFO) << "predicted_value: [" << predict_log.str() << "]";
+    *output = data;
 
-    *output = predicted_value;
     return kVtEstimatorOk;
 }
 
 VtEstimatorStatus VirtualTempEstimator::Estimate(const std::vector<float> &thermistors,
-                                                 float *output) {
+                                                 std::vector<float> *output) {
     if (type == kUseMLModel) {
         return TFliteEstimate(thermistors, output);
     } else if (type == kUseLinearModel) {
@@ -446,6 +537,181 @@ VtEstimatorStatus VirtualTempEstimator::Estimate(const std::vector<float> &therm
     }
 
     LOG(ERROR) << "Unsupported estimationType [" << type << "]";
+    return kVtEstimatorUnSupported;
+}
+
+VtEstimatorStatus VirtualTempEstimator::TFliteGetMaxPredictWindowMs(size_t *predict_window_ms) {
+    if (tflite_instance_ == nullptr || common_instance_ == nullptr) {
+        LOG(ERROR) << "tflite_instance_ or common_instance_ is nullptr for predict window\n";
+        return kVtEstimatorInitFailed;
+    }
+
+    if (!common_instance_->is_initialized) {
+        LOG(ERROR) << "tflite_instance_ not initialized for " << tflite_instance_->model_path;
+        return kVtEstimatorInitFailed;
+    }
+
+    size_t window = tflite_instance_->predict_window_ms;
+    if (window == 0) {
+        return kVtEstimatorUnSupported;
+    }
+    *predict_window_ms = window;
+    return kVtEstimatorOk;
+}
+
+VtEstimatorStatus VirtualTempEstimator::GetMaxPredictWindowMs(size_t *predict_window_ms) {
+    if (type == kUseMLModel) {
+        return TFliteGetMaxPredictWindowMs(predict_window_ms);
+    }
+
+    LOG(ERROR) << "Unsupported estimationType [" << type << "]";
+    return kVtEstimatorUnSupported;
+}
+
+VtEstimatorStatus VirtualTempEstimator::TFlitePredictAfterTimeMs(const size_t time_ms,
+                                                                 float *output) {
+    if (tflite_instance_ == nullptr || common_instance_ == nullptr) {
+        LOG(ERROR) << "tflite_instance_ or common_instance_ is nullptr for predict window\n";
+        return kVtEstimatorInitFailed;
+    }
+
+    if (!common_instance_->is_initialized) {
+        LOG(ERROR) << "tflite_instance_ not initialized for " << tflite_instance_->model_path;
+        return kVtEstimatorInitFailed;
+    }
+
+    std::unique_lock<std::mutex> lock(tflite_instance_->tflite_methods.mutex);
+
+    size_t window = tflite_instance_->predict_window_ms;
+    auto sample_interval = tflite_instance_->sample_interval;
+    auto last_update_time = tflite_instance_->last_update_time;
+    auto request_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(boot_clock::now() -
+                                                                                 last_update_time);
+    // check for under sampling
+    if ((common_instance_->cur_sample_count < common_instance_->prev_samples_order) &&
+        !(tflite_instance_->support_under_sampling)) {
+        LOG(INFO) << tflite_instance_->model_path
+                  << " cannot provide prediction while under sampling";
+        return kVtEstimatorUnderSampling;
+    }
+
+    // calculate requested time since last update
+    request_time_ms = request_time_ms + std::chrono::milliseconds{time_ms};
+    if (sample_interval.count() == 0 || window == 0 ||
+        window < static_cast<size_t>(request_time_ms.count())) {
+        LOG(INFO) << tflite_instance_->model_path << " cannot predict temperature after ("
+                  << time_ms << " + " << request_time_ms.count() - time_ms
+                  << ") ms since last update with sample interval [" << sample_interval.count()
+                  << "] ms and predict window [" << window << "] ms";
+        return kVtEstimatorUnSupported;
+    }
+
+    size_t request_step = request_time_ms / sample_interval;
+    size_t output_label_count = tflite_instance_->output_label_count;
+    float *output_buffer = tflite_instance_->output_buffer;
+    float prediction;
+    if (request_step == output_label_count - 1) {
+        // request prediction is on the right boundary of the window
+        prediction = output_buffer[output_label_count - 1];
+    } else {
+        float left = output_buffer[request_step], right = output_buffer[request_step + 1];
+        prediction = left;
+        if (left != right) {
+            prediction += (request_time_ms - sample_interval * request_step) * (right - left) /
+                          sample_interval;
+        }
+    }
+
+    *output = prediction;
+
+    return kVtEstimatorOk;
+}
+
+VtEstimatorStatus VirtualTempEstimator::PredictAfterTimeMs(const size_t time_ms, float *output) {
+    if (type == kUseMLModel) {
+        return TFlitePredictAfterTimeMs(time_ms, output);
+    }
+
+    LOG(ERROR) << "PredictAfterTimeMs not supported for type [" << type << "]";
+    return kVtEstimatorUnSupported;
+}
+
+VtEstimatorStatus VirtualTempEstimator::TFliteGetAllPredictions(std::vector<float> *output) {
+    if (tflite_instance_ == nullptr || common_instance_ == nullptr) {
+        LOG(ERROR) << "tflite_instance_ or common_instance_ is nullptr for predict window\n";
+        return kVtEstimatorInitFailed;
+    }
+
+    std::unique_lock<std::mutex> lock(tflite_instance_->tflite_methods.mutex);
+
+    if (!common_instance_->is_initialized) {
+        LOG(ERROR) << "tflite_instance_ not initialized for " << tflite_instance_->model_path;
+        return kVtEstimatorInitFailed;
+    }
+
+    if (output == nullptr) {
+        LOG(ERROR) << "output is nullptr";
+        return kVtEstimatorInvalidArgs;
+    }
+
+    std::vector<float> tflite_output;
+    size_t output_buffer_size = tflite_instance_->output_buffer_size;
+    tflite_output.reserve(output_buffer_size);
+    for (size_t i = 0; i < output_buffer_size; ++i) {
+        tflite_output.emplace_back(tflite_instance_->output_buffer[i]);
+    }
+    *output = tflite_output;
+
+    return kVtEstimatorOk;
+}
+
+VtEstimatorStatus VirtualTempEstimator::GetAllPredictions(std::vector<float> *output) {
+    if (type == kUseMLModel) {
+        return TFliteGetAllPredictions(output);
+    }
+
+    LOG(INFO) << "GetAllPredicts not supported by estimationType [" << type << "]";
+    return kVtEstimatorUnSupported;
+}
+
+VtEstimatorStatus VirtualTempEstimator::TFLiteDumpStatus(std::string_view sensor_name,
+                                                         std::ostringstream *dump_buf) {
+    if (dump_buf == nullptr) {
+        LOG(ERROR) << "dump_buf is nullptr for " << sensor_name;
+        return kVtEstimatorInvalidArgs;
+    }
+
+    if (!common_instance_->is_initialized) {
+        LOG(ERROR) << "tflite_instance_ not initialized for " << tflite_instance_->model_path;
+        return kVtEstimatorInitFailed;
+    }
+
+    std::unique_lock<std::mutex> lock(tflite_instance_->tflite_methods.mutex);
+
+    *dump_buf << " Sensor Name: " << sensor_name << std::endl;
+    *dump_buf << "  Current Values: ";
+    size_t output_buffer_size = tflite_instance_->output_buffer_size;
+    for (size_t i = 0; i < output_buffer_size; ++i) {
+        // add offset to predicted value
+        float predicted_value = tflite_instance_->output_buffer[i];
+        predicted_value += CalculateOffset(common_instance_->offset_thresholds,
+                                           common_instance_->offset_values, predicted_value);
+        *dump_buf << predicted_value << ", ";
+    }
+    *dump_buf << std::endl;
+
+    *dump_buf << "  Model Path: \"" << tflite_instance_->model_path << "\"" << std::endl;
+
+    return kVtEstimatorOk;
+}
+
+VtEstimatorStatus VirtualTempEstimator::DumpStatus(std::string_view sensor_name,
+                                                   std::ostringstream *dump_buff) {
+    if (type == kUseMLModel) {
+        return TFLiteDumpStatus(sensor_name, dump_buff);
+    }
+
+    LOG(INFO) << "DumpStatus not supported by estimationType [" << type << "]";
     return kVtEstimatorUnSupported;
 }
 

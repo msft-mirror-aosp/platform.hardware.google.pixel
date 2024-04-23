@@ -672,6 +672,11 @@ std::unordered_map<std::string, Hint> HintManager::ParseActions(
     }                                                                                            \
     VARIABLE = adpfs[i][ENTRY].as##TYPE()
 
+#define ADPF_PARSE_OPTIONAL(VARIABLE, ENTRY, TYPE)                \
+    if (!adpfs[i][ENTRY].empty() || adpfs[i][ENTRY].is##TYPE()) { \
+        VARIABLE = adpfs[i][ENTRY].as##TYPE();                    \
+    }
+
 std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         const std::string &json_doc) {
     // function starts
@@ -694,6 +699,7 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     double staleTimeFactor;
     uint64_t reportingRate;
     double targetTimeFactor;
+
     std::vector<std::shared_ptr<AdpfConfig>> adpfs_parsed;
     std::set<std::string> name_parsed;
     Json::Value root;
@@ -724,6 +730,20 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             return adpfs_parsed;
         }
 
+        // heuristic boost configs
+        std::optional<bool> heuristicBoostOn;
+        std::optional<uint32_t> hBoostOnMissedCycles;
+        std::optional<double> hBoostOffMaxAvgRatio;
+        std::optional<uint32_t> hBoostOffMissedCycles;
+        std::optional<double> hBoostPidPuFactor;
+        std::optional<uint32_t> hBoostUclampMin;
+        std::optional<double> jankCheckTimeFactor;
+        std::optional<uint32_t> lowFrameRateThreshold;
+        std::optional<uint32_t> maxRecordsNum;
+
+        std::optional<uint32_t> uclampMinLoadUp;
+        std::optional<uint32_t> uclampMinLoadReset;
+
         ADPF_PARSE(pidOn, "PID_On", Bool);
         ADPF_PARSE(pidPOver, "PID_Po", Double);
         ADPF_PARSE(pidPUnder, "PID_Pu", Double);
@@ -735,6 +755,8 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(pidDUnder, "PID_Du", Double);
         ADPF_PARSE(adpfUclamp, "UclampMin_On", Bool);
         ADPF_PARSE(uclampMinInit, "UclampMin_Init", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadUp, "UclampMin_LoadUp", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadReset, "UclampMin_LoadReset", UInt);
         ADPF_PARSE(uclampMinHighLimit, "UclampMin_High", UInt);
         ADPF_PARSE(uclampMinLowLimit, "UclampMin_Low", UInt);
         ADPF_PARSE(samplingWindowP, "SamplingWindow_P", UInt64);
@@ -743,6 +765,15 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(staleTimeFactor, "StaleTimeFactor", Double);
         ADPF_PARSE(reportingRate, "ReportingRateLimitNs", UInt64);
         ADPF_PARSE(targetTimeFactor, "TargetTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(heuristicBoostOn, "HeuristicBoost_On", Bool);
+        ADPF_PARSE_OPTIONAL(hBoostOnMissedCycles, "HBoostOnMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostOffMaxAvgRatio, "HBoostOffMaxAvgRatio", Double);
+        ADPF_PARSE_OPTIONAL(hBoostOffMissedCycles, "HBoostOffMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostPidPuFactor, "HBoostPidPuFactor", Double);
+        ADPF_PARSE_OPTIONAL(hBoostUclampMin, "HBoostUclampMin", UInt);
+        ADPF_PARSE_OPTIONAL(jankCheckTimeFactor, "JankCheckTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(lowFrameRateThreshold, "LowFrameRateThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(maxRecordsNum, "MaxRecordsNum", UInt);
 
         if (!adpfs[i]["GpuBoost"].empty() && adpfs[i]["GpuBoost"].isBool()) {
             gpuBoost = adpfs[i]["GpuBoost"].asBool();
@@ -756,12 +787,35 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             gpuCapacityLoadUpHeadroom = adpfs[i]["GpuCapacityLoadUpHeadroom"].asUInt64();
         }
 
+        // Check all the heuristic configurations are there if heuristic boost is going to
+        // be used.
+        if (heuristicBoostOn.has_value()) {
+            if (!hBoostOnMissedCycles.has_value() || !hBoostOffMaxAvgRatio.has_value() ||
+                !hBoostOffMissedCycles.has_value() || !hBoostPidPuFactor.has_value() ||
+                !hBoostUclampMin.has_value() || !jankCheckTimeFactor.has_value() ||
+                !lowFrameRateThreshold.has_value() || !maxRecordsNum.has_value()) {
+                LOG(ERROR) << "Part of the heuristic boost configurations are missing!";
+                adpfs_parsed.clear();
+                return adpfs_parsed;
+            }
+        }
+
+        if (!uclampMinLoadUp.has_value()) {
+            uclampMinLoadUp = uclampMinHighLimit;
+        }
+        if (!uclampMinLoadReset.has_value()) {
+            uclampMinLoadReset = uclampMinHighLimit;
+        }
+
         adpfs_parsed.emplace_back(std::make_shared<AdpfConfig>(
                 name, pidOn, pidPOver, pidPUnder, pidI, pidIInit, pidIHighLimit, pidILowLimit,
                 pidDOver, pidDUnder, adpfUclamp, uclampMinInit, uclampMinHighLimit,
                 uclampMinLowLimit, samplingWindowP, samplingWindowI, samplingWindowD, reportingRate,
                 targetTimeFactor, staleTimeFactor, gpuBoost, gpuBoostCapacityMax,
-                gpuCapacityLoadUpHeadroom));
+                gpuCapacityLoadUpHeadroom, heuristicBoostOn, hBoostOnMissedCycles,
+                hBoostOffMaxAvgRatio, hBoostOffMissedCycles, hBoostPidPuFactor, hBoostUclampMin,
+                jankCheckTimeFactor, lowFrameRateThreshold, maxRecordsNum, uclampMinLoadUp.value(),
+                uclampMinLoadReset.value()));
     }
     LOG(INFO) << adpfs_parsed.size() << " AdpfConfigs parsed successfully";
     return adpfs_parsed;
