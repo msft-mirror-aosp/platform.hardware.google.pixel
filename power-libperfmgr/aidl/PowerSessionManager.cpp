@@ -29,6 +29,7 @@
 #include <utils/Trace.h>
 
 #include "AdpfTypes.h"
+#include "AppDescriptorTrace.h"
 
 namespace aidl {
 namespace google {
@@ -104,6 +105,7 @@ int PowerSessionManager::getDisplayRefreshRate() {
 
 void PowerSessionManager::addPowerSession(const std::string &idString,
                                           const std::shared_ptr<AppHintDesc> &sessionDescriptor,
+                                          const std::shared_ptr<AppDescriptorTrace> &sessionTrace,
                                           const std::vector<int32_t> &threadIds) {
     if (!sessionDescriptor) {
         ALOGE("sessionDescriptor is null. PowerSessionManager failed to add power session: %s",
@@ -119,8 +121,9 @@ void PowerSessionManager::addPowerSession(const std::string &idString,
     sve.isAppSession = sessionDescriptor->uid >= AID_APP_START;
     sve.lastUpdatedTime = timeNow;
     sve.votes = std::make_shared<Votes>();
+    sve.sessionTrace = sessionTrace;
     sve.votes->add(
-            static_cast<std::underlying_type_t<AdpfHintType>>(AdpfHintType::ADPF_VOTE_DEFAULT),
+            static_cast<std::underlying_type_t<AdpfVoteType>>(AdpfVoteType::CPU_VOTE_DEFAULT),
             CpuVote(false, timeNow, sessionDescriptor->targetNs, kUclampMin, kUclampMax));
 
     bool addedRes = false;
@@ -270,9 +273,9 @@ void PowerSessionManager::resume(int64_t sessionId) {
     updateUniversalBoostMode();
 }
 
-void PowerSessionManager::updateTargetWorkDuration(int64_t sessionId, AdpfHintType voteId,
+void PowerSessionManager::updateTargetWorkDuration(int64_t sessionId, AdpfVoteType voteId,
                                                    std::chrono::nanoseconds durationNs) {
-    int voteIdInt = static_cast<std::underlying_type_t<AdpfHintType>>(voteId);
+    int voteIdInt = static_cast<std::underlying_type_t<AdpfVoteType>>(voteId);
     std::lock_guard<std::mutex> lock(mSessionTaskMapMutex);
     auto sessValPtr = mSessionTaskMap.findSession(sessionId);
     if (nullptr == sessValPtr) {
@@ -286,10 +289,10 @@ void PowerSessionManager::updateTargetWorkDuration(int64_t sessionId, AdpfHintTy
     // revisit that decision.
 }
 
-void PowerSessionManager::voteSet(int64_t sessionId, AdpfHintType voteId, int uclampMin,
+void PowerSessionManager::voteSet(int64_t sessionId, AdpfVoteType voteId, int uclampMin,
                                   int uclampMax, std::chrono::steady_clock::time_point startTime,
                                   std::chrono::nanoseconds durationNs) {
-    const int voteIdInt = static_cast<std::underlying_type_t<AdpfHintType>>(voteId);
+    const int voteIdInt = static_cast<std::underlying_type_t<AdpfVoteType>>(voteId);
     const auto timeoutDeadline = startTime + durationNs;
     bool scheduleTimeout = false;
 
@@ -311,6 +314,9 @@ void PowerSessionManager::voteSet(int64_t sessionId, AdpfHintType voteId, int uc
         }
         sessValPtr->votes->add(voteIdInt,
                                CpuVote(true, startTime, durationNs, uclampMin, uclampMax));
+        if (ATRACE_ENABLED()) {
+            ATRACE_INT(sessValPtr->sessionTrace->trace_votes[voteIdInt].c_str(), uclampMin);
+        }
         sessValPtr->lastUpdatedTime = startTime;
     }
 
@@ -338,12 +344,14 @@ void PowerSessionManager::disableBoosts(int64_t sessionId) {
         }
 
         // sessValPtr->disableBoosts();
-        for (auto vid :
-             {AdpfHintType::ADPF_CPU_LOAD_UP, AdpfHintType::ADPF_CPU_LOAD_RESET,
-              AdpfHintType::ADPF_CPU_LOAD_RESUME, AdpfHintType::ADPF_VOTE_POWER_EFFICIENCY,
-              AdpfHintType::ADPF_GPU_LOAD_UP, AdpfHintType::ADPF_GPU_LOAD_RESET}) {
-            auto vint = static_cast<std::underlying_type_t<AdpfHintType>>(vid);
+        for (auto vid : {AdpfVoteType::CPU_LOAD_UP, AdpfVoteType::CPU_LOAD_RESET,
+                         AdpfVoteType::CPU_LOAD_RESUME, AdpfVoteType::VOTE_POWER_EFFICIENCY,
+                         AdpfVoteType::GPU_LOAD_UP, AdpfVoteType::GPU_LOAD_RESET}) {
+            auto vint = static_cast<std::underlying_type_t<AdpfVoteType>>(vid);
             sessValPtr->votes->setUseVote(vint, false);
+            if (ATRACE_ENABLED()) {
+                ATRACE_INT(sessValPtr->sessionTrace->trace_votes[vint].c_str(), 0);
+            }
         }
     }
 }
@@ -389,6 +397,10 @@ void PowerSessionManager::handleEvent(const EventSessionTimeout &eventTimeout) {
             if (voteTimeout <= tNow) {
                 sessValPtr->votes->setUseVote(eventTimeout.voteId, false);
                 recalcUclamp = true;
+                if (ATRACE_ENABLED()) {
+                    ATRACE_INT(sessValPtr->sessionTrace->trace_votes[eventTimeout.voteId].c_str(),
+                               0);
+                }
             } else {
                 // Can unlock sooner than we do
                 auto eventTimeout2 = eventTimeout;
