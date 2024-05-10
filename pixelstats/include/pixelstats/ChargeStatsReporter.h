@@ -43,9 +43,13 @@ class ChargeStatsReporter {
     void ReportChargeStats(const std::shared_ptr<IStats> &stats_client, const std::string line,
                            const std::string wline_at, const std::string wline_ac,
                            const std::string pca_line);
+    bool shouldReportEvent(void);
+    int64_t getTimeSecs(void);
 
     WirelessChargeStats wireless_charge_stats_;
     PcaChargeStats pca_charge_stats_;
+
+    int log_event_time_secs_ = 0;
 
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number
@@ -56,6 +60,8 @@ class ChargeStatsReporter {
             "/sys/devices/platform/google,charger/thermal_stats";
 
     const std::string kGChargerMetricsPath = "/sys/devices/platform/google,charger/charge_stats";
+
+    const std::string kGDualBattMetricsPath = "/sys/class/power_supply/dualbatt/dbatt_stats";
 };
 
 }  // namespace pixel

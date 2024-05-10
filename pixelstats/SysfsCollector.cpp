@@ -29,8 +29,13 @@
 
 #include <mntent.h>
 #include <sys/timerfd.h>
+#include <sys/vfs.h>
 #include <cinttypes>
 #include <string>
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
 
 namespace android {
 namespace hardware {
@@ -45,20 +50,33 @@ using android::base::WriteStringToFile;
 using android::hardware::google::pixel::PixelAtoms::BatteryCapacity;
 using android::hardware::google::pixel::PixelAtoms::BlockStatsReported;
 using android::hardware::google::pixel::PixelAtoms::BootStatsInfo;
+using android::hardware::google::pixel::PixelAtoms::DisplayPanelErrorStats;
+using android::hardware::google::pixel::PixelAtoms::F2fsAtomicWriteInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsCompressionInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsGcSegmentInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsSmartIdleMaintEnabledStateChanged;
 using android::hardware::google::pixel::PixelAtoms::F2fsStatsInfo;
+using android::hardware::google::pixel::PixelAtoms::PartitionsUsedSpaceReported;
+using android::hardware::google::pixel::PixelAtoms::PcieLinkStatsReported;
 using android::hardware::google::pixel::PixelAtoms::StorageUfsHealth;
 using android::hardware::google::pixel::PixelAtoms::StorageUfsResetCount;
 using android::hardware::google::pixel::PixelAtoms::ThermalDfsStats;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioAdaptedInfoStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioBtMediaStatsReported;
 using android::hardware::google::pixel::PixelAtoms::VendorAudioHardwareStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioOffloadedEffectStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioPcmStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioPdmStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorAudioThirdPartyEffectStatsReported;
 using android::hardware::google::pixel::PixelAtoms::VendorChargeCycles;
 using android::hardware::google::pixel::PixelAtoms::VendorHardwareFailed;
+using android::hardware::google::pixel::PixelAtoms::VendorLongIRQStatsReported;
+using android::hardware::google::pixel::PixelAtoms::VendorResumeLatencyStats;
 using android::hardware::google::pixel::PixelAtoms::VendorSlowIo;
 using android::hardware::google::pixel::PixelAtoms::VendorSpeakerImpedance;
 using android::hardware::google::pixel::PixelAtoms::VendorSpeakerStatsReported;
 using android::hardware::google::pixel::PixelAtoms::VendorSpeechDspStat;
+using android::hardware::google::pixel::PixelAtoms::VendorTempResidencyStats;
 using android::hardware::google::pixel::PixelAtoms::ZramBdStat;
 using android::hardware::google::pixel::PixelAtoms::ZramMmStat;
 
@@ -81,14 +99,39 @@ SysfsCollector::SysfsCollector(const struct SysfsPaths &sysfs_paths)
       kZramMmStatPath("/sys/block/zram0/mm_stat"),
       kZramBdStatPath("/sys/block/zram0/bd_stat"),
       kEEPROMPath(sysfs_paths.EEPROMPath),
+      kBrownoutCsvPath(sysfs_paths.BrownoutCsvPath),
+      kBrownoutLogPath(sysfs_paths.BrownoutLogPath),
+      kBrownoutReasonProp(sysfs_paths.BrownoutReasonProp),
       kPowerMitigationStatsPath(sysfs_paths.MitigationPath),
+      kPowerMitigationDurationPath(sysfs_paths.MitigationDurationPath),
       kSpeakerTemperaturePath(sysfs_paths.SpeakerTemperaturePath),
       kSpeakerExcursionPath(sysfs_paths.SpeakerExcursionPath),
       kSpeakerHeartbeatPath(sysfs_paths.SpeakerHeartBeatPath),
       kUFSErrStatsPath(sysfs_paths.UFSErrStatsPath),
       kBlockStatsLength(sysfs_paths.BlockStatsLength),
       kAmsRatePath(sysfs_paths.AmsRatePath),
-      kThermalStatsPaths(sysfs_paths.ThermalStatsPaths) {}
+      kThermalStatsPaths(sysfs_paths.ThermalStatsPaths),
+      kCCARatePath(sysfs_paths.CCARatePath),
+      kTempResidencyAndResetPaths(sysfs_paths.TempResidencyAndResetPaths),
+      kLongIRQMetricsPath(sysfs_paths.LongIRQMetricsPath),
+      kStormIRQMetricsPath(sysfs_paths.StormIRQMetricsPath),
+      kIRQStatsResetPath(sysfs_paths.IRQStatsResetPath),
+      kResumeLatencyMetricsPath(sysfs_paths.ResumeLatencyMetricsPath),
+      kModemPcieLinkStatsPath(sysfs_paths.ModemPcieLinkStatsPath),
+      kWifiPcieLinkStatsPath(sysfs_paths.WifiPcieLinkStatsPath),
+      kDisplayStatsPaths(sysfs_paths.DisplayStatsPaths),
+      kPDMStatePath(sysfs_paths.PDMStatePath),
+      kWavesPath(sysfs_paths.WavesPath),
+      kAdaptedInfoCountPath(sysfs_paths.AdaptedInfoCountPath),
+      kAdaptedInfoDurationPath(sysfs_paths.AdaptedInfoDurationPath),
+      kPcmLatencyPath(sysfs_paths.PcmLatencyPath),
+      kPcmCountPath(sysfs_paths.PcmCountPath),
+      kTotalCallCountPath(sysfs_paths.TotalCallCountPath),
+      kOffloadEffectsIdPath(sysfs_paths.OffloadEffectsIdPath),
+      kOffloadEffectsDurationPath(sysfs_paths.OffloadEffectsDurationPath),
+      kBluetoothAudioUsagePath(sysfs_paths.BluetoothAudioUsagePath),
+      kGMSRPath(sysfs_paths.GMSRPath),
+      kMaxfgHistoryPath("/dev/maxfg_history") {}
 
 bool SysfsCollector::ReadFileToInt(const std::string &path, int *val) {
     return ReadFileToInt(path.c_str(), val);
@@ -157,10 +200,17 @@ void SysfsCollector::logBatteryChargeCycles(const std::shared_ptr<IStats> &stats
 void SysfsCollector::logBatteryEEPROM(const std::shared_ptr<IStats> &stats_client) {
     if (kEEPROMPath == nullptr || strlen(kEEPROMPath) == 0) {
         ALOGV("Battery EEPROM path not specified");
-        return;
+    } else {
+        battery_EEPROM_reporter_.checkAndReport(stats_client, kEEPROMPath);
     }
 
-    battery_EEPROM_reporter_.checkAndReport(stats_client, kEEPROMPath);
+    if (kGMSRPath == nullptr || strlen(kGMSRPath) == 0) {
+         ALOGV("Battery GMSR path not specified");
+    } else {
+        battery_EEPROM_reporter_.checkAndReportGMSR(stats_client, kGMSRPath);
+    }
+
+    battery_EEPROM_reporter_.checkAndReportMaxfgHistory(stats_client, kMaxfgHistoryPath);
 }
 
 /**
@@ -292,85 +342,82 @@ void SysfsCollector::logSpeakerImpedance(const std::shared_ptr<IStats> &stats_cl
  * Report the last-detected impedance, temperature and heartbeats of left & right speakers.
  */
 void SysfsCollector::logSpeakerHealthStats(const std::shared_ptr<IStats> &stats_client) {
-    std::string file_contents;
+    std::string file_contents_impedance;
+    std::string file_contents_temperature;
+    std::string file_contents_excursion;
+    std::string file_contents_heartbeat;
+    int count, i;
+    float impedance_ohm[4];
+    float temperature_C[4];
+    float excursion_mm[4];
+    float heartbeat[4];
 
     if (kImpedancePath == nullptr || strlen(kImpedancePath) == 0) {
         ALOGD("Audio impedance path not specified");
+        return;
+    } else if (!ReadFileToString(kImpedancePath, &file_contents_impedance)) {
+        ALOGD("Unable to read speaker impedance path %s", kImpedancePath);
         return;
     }
 
     if (kSpeakerTemperaturePath == nullptr || strlen(kSpeakerTemperaturePath) == 0) {
         ALOGD("Audio speaker temperature path not specified");
         return;
-    }
-
-    if (kSpeakerHeartbeatPath == nullptr || strlen(kSpeakerHeartbeatPath) == 0) {
-        ALOGD("Audio speaker heartbeat path not specified");
+    } else if (!ReadFileToString(kSpeakerTemperaturePath, &file_contents_temperature)) {
+        ALOGD("Unable to read speaker temperature path %s", kSpeakerTemperaturePath);
         return;
     }
 
     if (kSpeakerExcursionPath == nullptr || strlen(kSpeakerExcursionPath) == 0) {
         ALOGD("Audio speaker excursion path not specified");
         return;
-    }
-
-    float left_impedance_ohm, right_impedance_ohm;
-
-    if (!ReadFileToString(kImpedancePath, &file_contents)) {
-        ALOGE("Unable to read speaker impedance path %s", kImpedancePath);
-        return;
-    }
-    if (sscanf(file_contents.c_str(), "%g,%g", &left_impedance_ohm, &right_impedance_ohm) != 2) {
-        ALOGE("Unable to parse speaker impedance %s", file_contents.c_str());
+    } else if (!ReadFileToString(kSpeakerExcursionPath, &file_contents_excursion)) {
+        ALOGD("Unable to read speaker excursion path %s", kSpeakerExcursionPath);
         return;
     }
 
-    float left_temperature_C, right_temperature_C;
-    if (!ReadFileToString(kSpeakerTemperaturePath, &file_contents)) {
-        ALOGE("Unable to read speaker temperature path %s", kSpeakerTemperaturePath);
+    if (kSpeakerHeartbeatPath == nullptr || strlen(kSpeakerHeartbeatPath) == 0) {
+        ALOGD("Audio speaker heartbeat path not specified");
         return;
-    }
-    if (sscanf(file_contents.c_str(), "%g,%g", &left_temperature_C, &right_temperature_C) != 2) {
-        ALOGE("Unable to parse speaker temperature %s", file_contents.c_str());
-        return;
-    }
-
-    float left_excursion_mm, right_excursion_mm;
-    if (!ReadFileToString(kSpeakerExcursionPath, &file_contents)) {
-        ALOGE("Unable to read speaker excursion path %s", kSpeakerExcursionPath);
-        return;
-    }
-    if (sscanf(file_contents.c_str(), "%g,%g", &left_excursion_mm, &right_excursion_mm) != 2) {
-        ALOGE("Unable to parse speaker excursion %s", file_contents.c_str());
+    } else if (!ReadFileToString(kSpeakerHeartbeatPath, &file_contents_heartbeat)) {
+        ALOGD("Unable to read speaker heartbeat path %s", kSpeakerHeartbeatPath);
         return;
     }
 
-    float left_heartbeat, right_heartbeat;
-    if (!ReadFileToString(kSpeakerHeartbeatPath, &file_contents)) {
-        ALOGE("Unable to read speaker heartbeat path %s", kSpeakerHeartbeatPath);
+    count = sscanf(file_contents_impedance.c_str(), "%g,%g,%g,%g", &impedance_ohm[0],
+                   &impedance_ohm[1], &impedance_ohm[2], &impedance_ohm[3]);
+    if (count <= 0)
         return;
-    }
-    if (sscanf(file_contents.c_str(), "%g,%g", &left_heartbeat, &right_heartbeat) != 2) {
-        ALOGE("Unable to parse speaker heartbeat %s", file_contents.c_str());
+
+    count = sscanf(file_contents_temperature.c_str(), "%g,%g,%g,%g", &temperature_C[0],
+                   &temperature_C[1], &temperature_C[2], &temperature_C[3]);
+    if (count <= 0)
         return;
+
+    count = sscanf(file_contents_excursion.c_str(), "%g,%g,%g,%g", &excursion_mm[0],
+                   &excursion_mm[1], &excursion_mm[2], &excursion_mm[3]);
+    if (count <= 0)
+        return;
+
+    count = sscanf(file_contents_heartbeat.c_str(), "%g,%g,%g,%g", &heartbeat[0], &heartbeat[1],
+                   &heartbeat[2], &heartbeat[3]);
+    if (count <= 0)
+        return;
+
+    VendorSpeakerStatsReported obj[4];
+    for (i = 0; i < count && i < 4; i++) {
+        obj[i].set_speaker_location(i);
+        obj[i].set_impedance(static_cast<int32_t>(impedance_ohm[i] * 1000));
+        obj[i].set_max_temperature(static_cast<int32_t>(temperature_C[i] * 1000));
+        obj[i].set_excursion(static_cast<int32_t>(excursion_mm[i] * 1000));
+        obj[i].set_heartbeat(static_cast<int32_t>(heartbeat[i]));
+
+        reportSpeakerHealthStat(stats_client, obj[i]);
     }
+}
 
-    VendorSpeakerStatsReported left_obj;
-    left_obj.set_speaker_location(0);
-    left_obj.set_impedance(static_cast<int32_t>(left_impedance_ohm * 1000));
-    left_obj.set_max_temperature(static_cast<int32_t>(left_temperature_C * 1000));
-    left_obj.set_excursion(static_cast<int32_t>(left_excursion_mm * 1000));
-    left_obj.set_heartbeat(static_cast<int32_t>(left_heartbeat));
-
-    VendorSpeakerStatsReported right_obj;
-    right_obj.set_speaker_location(1);
-    right_obj.set_impedance(static_cast<int32_t>(right_impedance_ohm * 1000));
-    right_obj.set_max_temperature(static_cast<int32_t>(right_temperature_C * 1000));
-    right_obj.set_excursion(static_cast<int32_t>(right_excursion_mm * 1000));
-    right_obj.set_heartbeat(static_cast<int32_t>(right_heartbeat));
-
-    reportSpeakerHealthStat(stats_client, left_obj);
-    reportSpeakerHealthStat(stats_client, right_obj);
+void SysfsCollector::logDisplayStats(const std::shared_ptr<IStats> &stats_client) {
+    display_stats_reporter_.logDisplayStats(stats_client, kDisplayStatsPaths);
 }
 
 void SysfsCollector::logThermalStats(const std::shared_ptr<IStats> &stats_client) {
@@ -488,7 +535,7 @@ void SysfsCollector::logUFSErrorStats(const std::shared_ptr<IStats> &stats_clien
     int value, host_reset_count = 0;
 
     if (kUFSErrStatsPath.empty() || strlen(kUFSErrStatsPath.front().c_str()) == 0) {
-        ALOGV("UFS host reset count specified");
+        ALOGV("UFS host reset count path not specified");
         return;
     }
 
@@ -609,6 +656,68 @@ void SysfsCollector::logF2fsStats(const std::shared_ptr<IStats> &stats_client) {
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk()) {
         ALOGE("Unable to report F2fs stats to Stats service");
+    }
+}
+
+void SysfsCollector::logF2fsAtomicWriteInfo(const std::shared_ptr<IStats> &stats_client) {
+    int peak_atomic_write, committed_atomic_block, revoked_atomic_block;
+
+    if (kF2fsStatsPath == nullptr) {
+        ALOGV("F2fs stats path not specified");
+        return;
+    }
+
+    std::string userdataBlock = getUserDataBlock();
+
+    std::string path = kF2fsStatsPath + (userdataBlock + "/peak_atomic_write");
+    if (!ReadFileToInt(path, &peak_atomic_write)) {
+        ALOGE("Unable to read peak_atomic_write");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    path = kF2fsStatsPath + (userdataBlock + "/committed_atomic_block");
+    if (!ReadFileToInt(path, &committed_atomic_block)) {
+        ALOGE("Unable to read committed_atomic_block");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    path = kF2fsStatsPath + (userdataBlock + "/revoked_atomic_block");
+    if (!ReadFileToInt(path, &revoked_atomic_block)) {
+        ALOGE("Unable to read revoked_atomic_block");
+        return;
+    } else {
+        if (!WriteStringToFile(std::to_string(0), path)) {
+            ALOGE("Failed to write to file %s", path.c_str());
+            return;
+        }
+    }
+
+    // Load values array
+    std::vector<VendorAtomValue> values(3);
+    values[F2fsAtomicWriteInfo::kPeakAtomicWriteFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(peak_atomic_write);
+    values[F2fsAtomicWriteInfo::kCommittedAtomicBlockFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(committed_atomic_block);
+    values[F2fsAtomicWriteInfo::kRevokedAtomicBlockFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>(revoked_atomic_block);
+
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kF2FsAtomicWriteInfo,
+                        .values = values};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk()) {
+        ALOGE("Unable to report F2fs Atomic Write info to Stats service");
     }
 }
 
@@ -754,7 +863,7 @@ void SysfsCollector::logF2fsSmartIdleMaintEnabled(const std::shared_ptr<IStats> 
                         .values = std::move(values)};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk()) {
-        ALOGE("Unable to report Boot stats to Stats service");
+        ALOGE("Unable to report F2fsSmartIdleMaintEnabled to Stats service");
     }
 }
 
@@ -783,8 +892,8 @@ void SysfsCollector::logBlockStatsReported(const std::shared_ptr<IStats> &stats_
     }
 
     if (stats.size() < kBlockStatsLength) {
-        ALOGE("block layer stat format is incorrect %s, length %lu/%d",
-            file_contents.c_str(), stats.size(), kBlockStatsLength);
+        ALOGE("block layer stat format is incorrect %s, length %zu/%d", file_contents.c_str(),
+              stats.size(), kBlockStatsLength);
         return;
     }
 
@@ -817,6 +926,14 @@ void SysfsCollector::logBlockStatsReported(const std::shared_ptr<IStats> &stats_
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk()) {
         ALOGE("Unable to report block layer stats to Stats service");
+    }
+}
+
+void SysfsCollector::logTempResidencyStats(const std::shared_ptr<IStats> &stats_client) {
+    for (const auto &temp_residency_and_reset_path : kTempResidencyAndResetPaths) {
+        temp_residency_reporter_.logTempResidencyStats(stats_client,
+                                                       temp_residency_and_reset_path.first,
+                                                       temp_residency_and_reset_path.second);
     }
 }
 
@@ -856,22 +973,23 @@ void SysfsCollector::reportZramMmStat(const std::shared_ptr<IStats> &stats_clien
         // The size should be the same as the number of fields in ZramMmStat
         std::vector<VendorAtomValue> values(6);
         VendorAtomValue tmp;
-        tmp.set<VendorAtomValue::intValue>(orig_data_size);
+        tmp.set<VendorAtomValue::longValue>(orig_data_size);
         values[ZramMmStat::kOrigDataSizeFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(compr_data_size);
+        tmp.set<VendorAtomValue::longValue>(compr_data_size);
         values[ZramMmStat::kComprDataSizeFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(mem_used_total);
+        tmp.set<VendorAtomValue::longValue>(mem_used_total);
         values[ZramMmStat::kMemUsedTotalFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(same_pages);
+        tmp.set<VendorAtomValue::longValue>(same_pages);
         values[ZramMmStat::kSamePagesFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(huge_pages);
+        tmp.set<VendorAtomValue::longValue>(huge_pages);
         values[ZramMmStat::kHugePagesFieldNumber - kVendorAtomOffset] = tmp;
 
         // Skip the first data to avoid a big spike in this accumulated value.
         if (prev_huge_pages_since_boot_ == -1)
-            tmp.set<VendorAtomValue::intValue>(0);
+            tmp.set<VendorAtomValue::longValue>(0);
         else
-            tmp.set<VendorAtomValue::intValue>(huge_pages_since_boot - prev_huge_pages_since_boot_);
+            tmp.set<VendorAtomValue::longValue>(huge_pages_since_boot -
+                                                prev_huge_pages_since_boot_);
 
         values[ZramMmStat::kHugePagesSinceBootFieldNumber - kVendorAtomOffset] = tmp;
         prev_huge_pages_since_boot_ = huge_pages_since_boot;
@@ -910,11 +1028,11 @@ void SysfsCollector::reportZramBdStat(const std::shared_ptr<IStats> &stats_clien
         // Load values array
         std::vector<VendorAtomValue> values(3);
         VendorAtomValue tmp;
-        tmp.set<VendorAtomValue::intValue>(bd_count);
+        tmp.set<VendorAtomValue::longValue>(bd_count);
         values[ZramBdStat::kBdCountFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(bd_reads);
+        tmp.set<VendorAtomValue::longValue>(bd_reads);
         values[ZramBdStat::kBdReadsFieldNumber - kVendorAtomOffset] = tmp;
-        tmp.set<VendorAtomValue::intValue>(bd_writes);
+        tmp.set<VendorAtomValue::longValue>(bd_writes);
         values[ZramBdStat::kBdWritesFieldNumber - kVendorAtomOffset] = tmp;
 
         // Send vendor atom to IStats HAL
@@ -978,41 +1096,961 @@ void SysfsCollector::logBootStats(const std::shared_ptr<IStats> &stats_client) {
 }
 
 /**
- * Report the AMS rate.
+ * Report the AMS & CCA rate.
  */
 void SysfsCollector::logVendorAudioHardwareStats(const std::shared_ptr<IStats> &stats_client) {
     std::string file_contents;
+    uint32_t milli_ams_rate, c1, c2, c3, c4;
+    uint32_t total_call_voice = 0, total_call_voip = 0;
+    bool isAmsReady = false, isCCAReady = false;
+
     if (kAmsRatePath == nullptr) {
-        ALOGD("Audio AMS_Rate path not specified");
+        ALOGD("Audio AMS Rate path not specified");
+    } else {
+        if (!ReadFileToString(kAmsRatePath, &file_contents)) {
+            ALOGD("Unable to read ams_rate path %s", kAmsRatePath);
+        } else {
+            if (sscanf(file_contents.c_str(), "%u", &milli_ams_rate) != 1) {
+                ALOGD("Unable to parse ams_rate %s", file_contents.c_str());
+            } else {
+                isAmsReady = true;
+                ALOGD("milli_ams_rate = %u", milli_ams_rate);
+            }
+        }
+    }
+
+    if (kCCARatePath == nullptr) {
+        ALOGD("Audio CCA Rate path not specified");
+    } else {
+        if (!ReadFileToString(kCCARatePath, &file_contents)) {
+            ALOGD("Unable to read cca_rate path %s", kCCARatePath);
+        } else {
+            if (sscanf(file_contents.c_str(), "%u %u %u %u", &c1, &c2, &c3, &c4) != 4) {
+                ALOGD("Unable to parse cca rates %s", file_contents.c_str());
+            } else {
+                isCCAReady = true;
+            }
+        }
+    }
+
+    if (kTotalCallCountPath == nullptr) {
+        ALOGD("Total call count path not specified");
+    } else {
+        if (!ReadFileToString(kTotalCallCountPath, &file_contents)) {
+            ALOGD("Unable to read total call path %s", kTotalCallCountPath);
+        } else {
+            if (sscanf(file_contents.c_str(), "%u %u", &total_call_voice, &total_call_voip) != 2) {
+                ALOGD("Unable to parse total call %s", file_contents.c_str());
+            }
+        }
+    }
+
+    if (!(isAmsReady || isCCAReady)) {
+        ALOGD("no ams or cca data to report");
         return;
     }
 
-    uint32_t milli_ams_rate;
-    if (!ReadFileToString(kAmsRatePath, &file_contents)) {
-        ALOGE("Unable to read ams_rate path %s", kAmsRatePath);
+    // Sending ams_rate, total_call, c1 and c2
+    {
+        std::vector<VendorAtomValue> values(7);
+        VendorAtomValue tmp;
+
+        if (isAmsReady) {
+            tmp.set<VendorAtomValue::intValue>(milli_ams_rate);
+            values[VendorAudioHardwareStatsReported::kMilliRateOfAmsPerDayFieldNumber -
+                   kVendorAtomOffset] = tmp;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(1);
+        values[VendorAudioHardwareStatsReported::kSourceFieldNumber - kVendorAtomOffset] = tmp;
+
+        if (isCCAReady) {
+            tmp.set<VendorAtomValue::intValue>(c1);
+            values[VendorAudioHardwareStatsReported::kCcaActiveCountPerDayFieldNumber -
+                   kVendorAtomOffset] = tmp;
+
+            tmp.set<VendorAtomValue::intValue>(c2);
+            values[VendorAudioHardwareStatsReported::kCcaEnableCountPerDayFieldNumber -
+                   kVendorAtomOffset] = tmp;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(total_call_voice);
+        values[VendorAudioHardwareStatsReported::kTotalCallCountPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioHardwareStatsReported,
+                            .values = std::move(values)};
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioHardwareStatsReported to Stats service");
+    }
+
+    // Sending total_call, c3 and c4
+    {
+        std::vector<VendorAtomValue> values(7);
+        VendorAtomValue tmp;
+
+        tmp.set<VendorAtomValue::intValue>(0);
+        values[VendorAudioHardwareStatsReported::kSourceFieldNumber - kVendorAtomOffset] = tmp;
+
+        if (isCCAReady) {
+            tmp.set<VendorAtomValue::intValue>(c3);
+            values[VendorAudioHardwareStatsReported::kCcaActiveCountPerDayFieldNumber -
+                   kVendorAtomOffset] = tmp;
+
+            tmp.set<VendorAtomValue::intValue>(c4);
+            values[VendorAudioHardwareStatsReported::kCcaEnableCountPerDayFieldNumber -
+                   kVendorAtomOffset] = tmp;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(total_call_voip);
+        values[VendorAudioHardwareStatsReported::kTotalCallCountPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioHardwareStatsReported,
+                            .values = std::move(values)};
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioHardwareStatsReported to Stats service");
+    }
+}
+
+/**
+ * Report PDM States which indicates microphone background noise level.
+ * This function will report at most 4 atoms showing different background noise type.
+ */
+void SysfsCollector::logVendorAudioPdmStatsReported(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<int> pdm_states;
+
+    if (kPDMStatePath == nullptr) {
+        ALOGD("Audio PDM State path not specified");
+    } else {
+        if (!ReadFileToString(kPDMStatePath, &file_contents)) {
+            ALOGD("Unable to read PDM State path %s", kPDMStatePath);
+        } else {
+            std::stringstream file_content_stream(file_contents);
+            while (file_content_stream.good()) {
+                std::string substr;
+                int state;
+                getline(file_content_stream, substr, ',');
+                if (sscanf(substr.c_str(), "%d", &state) != 1) {
+                    ALOGD("Unable to parse PDM State %s", file_contents.c_str());
+                } else {
+                    pdm_states.push_back(state);
+                    ALOGD("Parsed PDM State: %d", state);
+                }
+            }
+        }
+    }
+    if (pdm_states.empty()) {
+        ALOGD("Empty PDM State parsed.");
         return;
     }
 
-    if (sscanf(file_contents.c_str(), "%u", &milli_ams_rate) != 1) {
-        ALOGE("Unable to parse ams_rate %s", file_contents.c_str());
+    if (pdm_states.size() > 4) {
+        ALOGD("Too many values parsed.");
         return;
     }
 
-    ALOGD("milli_ams_rate = %s", file_contents.c_str());
+    for (int index = 0; index < pdm_states.size(); index++) {
+        std::vector<VendorAtomValue> values(2);
+        VendorAtomValue tmp;
 
-    std::vector<VendorAtomValue> values(1);
+        if (pdm_states[index] == 0) {
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(index);
+        values[VendorAudioPdmStatsReported::kPdmIndexFieldNumber - kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(pdm_states[index]);
+        values[VendorAudioPdmStatsReported::kStateFieldNumber - kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioPdmStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioPdmStatsReported at index %d", index);
+    }
+}
+
+/**
+ * Report Third party audio effects stats.
+ * This function will report at most 5 atoms showing different instance stats.
+ */
+void SysfsCollector::logWavesStats(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<std::vector<int>> volume_duration_per_instance;
+
+    constexpr int num_instances = 5;
+    constexpr int num_volume = 10;
+
+    if (kWavesPath == nullptr) {
+        ALOGD("Audio Waves stats path not specified");
+        return;
+    }
+
+    if (!ReadFileToString(kWavesPath, &file_contents)) {
+        ALOGD("Unable to read Wave stats path %s", kWavesPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int duration;
+        std::vector<int> volume_duration;
+        while (file_content_stream.good() && file_content_stream >> duration) {
+            volume_duration.push_back(duration);
+            if (volume_duration.size() >= num_volume) {
+                volume_duration_per_instance.push_back(volume_duration);
+                volume_duration.clear();
+            }
+        }
+    }
+
+    if (volume_duration_per_instance.size() != num_instances) {
+        ALOGE("Number of instances %zu doesn't match the correct number %d",
+              volume_duration_per_instance.size(), num_instances);
+        return;
+    }
+    for (int i = 0; i < volume_duration_per_instance.size(); i++) {
+        if (volume_duration_per_instance[i].size() != num_volume) {
+            ALOGE("Number of volume %zu doesn't match the correct number %d",
+                  volume_duration_per_instance[i].size(), num_volume);
+            return;
+        }
+    }
+
+    std::vector<int> volume_range_field_numbers = {
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange0ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange1ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange2ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange3ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange4ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange5ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange6ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange7ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange8ActiveMsPerDayFieldNumber,
+            VendorAudioThirdPartyEffectStatsReported::kVolumeRange9ActiveMsPerDayFieldNumber};
+
+    for (int index = 0; index < volume_duration_per_instance.size(); index++) {
+        std::vector<VendorAtomValue> values(11);
+        VendorAtomValue tmp;
+
+        bool has_value = false;
+        for (int volume_index = 0; volume_index < num_volume; volume_index++) {
+            if (volume_duration_per_instance[index][volume_index] > 0) {
+                has_value = true;
+            }
+        }
+        if (!has_value) {
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(index);
+        values[VendorAudioThirdPartyEffectStatsReported::kInstanceFieldNumber - kVendorAtomOffset] =
+                tmp;
+
+        for (int volume_index = 0; volume_index < num_volume; volume_index++) {
+            tmp.set<VendorAtomValue::intValue>(volume_duration_per_instance[index][volume_index]);
+            values[volume_range_field_numbers[volume_index] - kVendorAtomOffset] = tmp;
+        }
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioThirdPartyEffectStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioThirdPartyEffectStatsReported at index %d", index);
+    }
+}
+
+/**
+ * Report Audio Adapted Information stats such as thermal throttling.
+ * This function will report at most 6 atoms showing different instance stats.
+ */
+void SysfsCollector::logAdaptedInfoStats(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<int> count_per_feature;
+    std::vector<int> duration_per_feature;
+
+    constexpr int num_features = 6;
+
+    if (kAdaptedInfoCountPath == nullptr) {
+        ALOGD("Audio Adapted Info Count stats path not specified");
+        return;
+    }
+
+    if (kAdaptedInfoDurationPath == nullptr) {
+        ALOGD("Audio Adapted Info Duration stats path not specified");
+        return;
+    }
+
+    if (!ReadFileToString(kAdaptedInfoCountPath, &file_contents)) {
+        ALOGD("Unable to read Adapted Info Count stats path %s", kAdaptedInfoCountPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int count;
+        while (file_content_stream.good() && file_content_stream >> count) {
+            count_per_feature.push_back(count);
+        }
+    }
+
+    if (count_per_feature.size() != num_features) {
+        ALOGD("Audio Adapted Info Count doesn't match the number of features. %zu / %d",
+              count_per_feature.size(), num_features);
+        return;
+    }
+
+    if (!ReadFileToString(kAdaptedInfoDurationPath, &file_contents)) {
+        ALOGD("Unable to read Adapted Info Duration stats path %s", kAdaptedInfoDurationPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int duration;
+        while (file_content_stream.good() && file_content_stream >> duration) {
+            duration_per_feature.push_back(duration);
+        }
+    }
+
+    if (duration_per_feature.size() != num_features) {
+        ALOGD("Audio Adapted Info Duration doesn't match the number of features. %zu / %d",
+              duration_per_feature.size(), num_features);
+        return;
+    }
+
+    for (int index = 0; index < num_features; index++) {
+        std::vector<VendorAtomValue> values(3);
+        VendorAtomValue tmp;
+
+        if (count_per_feature[index] == 0 && duration_per_feature[index] == 0) {
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(index);
+        values[VendorAudioAdaptedInfoStatsReported::kFeatureIdFieldNumber - kVendorAtomOffset] =
+                tmp;
+
+        tmp.set<VendorAtomValue::intValue>(count_per_feature[index]);
+        values[VendorAudioAdaptedInfoStatsReported::kActiveCountsPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(duration_per_feature[index]);
+        values[VendorAudioAdaptedInfoStatsReported::kActiveDurationMsPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioAdaptedInfoStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioAdaptedInfoStatsReported at index %d", index);
+    }
+}
+
+/**
+ * Report audio PCM usage stats such as latency and active count.
+ * This function will report at most 19 atoms showing different PCM type.
+ */
+void SysfsCollector::logPcmUsageStats(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<int> count_per_type;
+    std::vector<int> latency_per_type;
+
+    constexpr int num_type = 19;
+
+    if (kPcmLatencyPath == nullptr) {
+        ALOGD("PCM Latency path not specified");
+        return;
+    }
+
+    if (kPcmCountPath == nullptr) {
+        ALOGD("PCM Count path not specified");
+        return;
+    }
+
+    if (!ReadFileToString(kPcmCountPath, &file_contents)) {
+        ALOGD("Unable to read PCM Count path %s", kPcmCountPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int count;
+        while (file_content_stream.good() && file_content_stream >> count) {
+            count_per_type.push_back(count);
+        }
+    }
+
+    if (count_per_type.size() != num_type) {
+        ALOGD("Audio PCM Count path doesn't match the number of features. %zu / %d",
+              count_per_type.size(), num_type);
+        return;
+    }
+
+    if (!ReadFileToString(kPcmLatencyPath, &file_contents)) {
+        ALOGD("Unable to read PCM Latency path %s", kPcmLatencyPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int duration;
+        while (file_content_stream.good() && file_content_stream >> duration) {
+            latency_per_type.push_back(duration);
+        }
+    }
+
+    if (latency_per_type.size() != num_type) {
+        ALOGD("Audio PCM Latency path doesn't match the number of features. %zu / %d",
+              latency_per_type.size(), num_type);
+        return;
+    }
+
+    for (int index = 0; index < num_type; index++) {
+        std::vector<VendorAtomValue> values(3);
+        VendorAtomValue tmp;
+
+        if (latency_per_type[index] == 0 && count_per_type[index] == 0) {
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(index);
+        values[VendorAudioPcmStatsReported::kTypeFieldNumber - kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(latency_per_type[index]);
+        values[VendorAudioPcmStatsReported::kPcmOpenLatencyAvgMsPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(count_per_type[index]);
+        values[VendorAudioPcmStatsReported::kPcmActiveCountsPerDayFieldNumber - kVendorAtomOffset] =
+                tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioPcmStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioPcmStatsReported at index %d", index);
+    }
+}
+
+/**
+ * Report audio Offload Effects usage stats duration per day.
+ */
+void SysfsCollector::logOffloadEffectsStats(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<int> uuids;
+    std::vector<int> durations;
+
+    if (kOffloadEffectsIdPath == nullptr) {
+        ALOGD("Offload Effects ID Path is not specified");
+        return;
+    }
+
+    if (kOffloadEffectsDurationPath == nullptr) {
+        ALOGD("Offload Effects Duration Path is not specified");
+        return;
+    }
+
+    if (!ReadFileToString(kOffloadEffectsIdPath, &file_contents)) {
+        ALOGD("Unable to read Offload Effect ID path %s", kOffloadEffectsIdPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int uuid;
+        while (file_content_stream.good() && file_content_stream >> uuid) {
+            uuids.push_back(uuid);
+        }
+    }
+
+    if (!ReadFileToString(kOffloadEffectsDurationPath, &file_contents)) {
+        ALOGD("Unable to read Offload Effect duration path %s", kOffloadEffectsDurationPath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int duration;
+        while (file_content_stream.good() && file_content_stream >> duration) {
+            durations.push_back(duration);
+        }
+    }
+
+    if (durations.size() * 4 != uuids.size()) {
+        ALOGD("ID and duration data does not match: %zu and %zu", durations.size(), uuids.size());
+        return;
+    }
+
+    for (int index = 0; index < durations.size(); index++) {
+        std::vector<VendorAtomValue> values(3);
+        VendorAtomValue tmp;
+        int64_t uuid_msb = ((int64_t)uuids[index * 4] << 32 | uuids[index * 4 + 1]);
+        int64_t uuid_lsb = ((int64_t)uuids[index * 4 + 2] << 32 | uuids[index * 4 + 3]);
+
+        if (uuid_msb == 0 && uuid_lsb == 0) {
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::VendorAtomValue::longValue>(uuid_msb);
+        values[VendorAudioOffloadedEffectStatsReported::kEffectUuidMsbFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::VendorAtomValue::longValue>(uuid_lsb);
+        values[VendorAudioOffloadedEffectStatsReported::kEffectUuidLsbFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(durations[index]);
+        values[VendorAudioOffloadedEffectStatsReported::kEffectActiveSecondsPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioOffloadedEffectStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk()) {
+            ALOGE("Unable to report VendorAudioOffloadedEffectStatsReported at index %d", index);
+        } else {
+            ALOGD("Reported VendorAudioOffloadedEffectStatsReported successfully at index %d",
+                  index);
+        }
+    }
+}
+
+/**
+ * Report bluetooth audio usage stats.
+ * This function will report at most 5 atoms showing different instance stats.
+ */
+void SysfsCollector::logBluetoothAudioUsage(const std::shared_ptr<IStats> &stats_client) {
+    std::string file_contents;
+    std::vector<int> duration_per_codec;
+
+    constexpr int num_codec = 5;
+
+    if (kBluetoothAudioUsagePath == nullptr) {
+        ALOGD("Bluetooth Audio stats path not specified");
+        return;
+    }
+
+    if (!ReadFileToString(kBluetoothAudioUsagePath, &file_contents)) {
+        ALOGD("Unable to read Bluetooth Audio stats path %s", kBluetoothAudioUsagePath);
+    } else {
+        std::stringstream file_content_stream(file_contents);
+        int duration;
+        while (file_content_stream.good() && file_content_stream >> duration) {
+            duration_per_codec.push_back(duration);
+        }
+    }
+
+    if (duration_per_codec.size() != num_codec) {
+        ALOGD("Bluetooth Audio num codec != number of codec. %zu / %d", duration_per_codec.size(),
+              num_codec);
+        return;
+    }
+
+    for (int index = 0; index < num_codec; index++) {
+        std::vector<VendorAtomValue> values(2);
+        VendorAtomValue tmp;
+
+        if (duration_per_codec[index] == 0) {
+            ALOGD("Skipped VendorAudioBtMediaStatsReported at codec:%d", index);
+            continue;
+        }
+
+        tmp.set<VendorAtomValue::intValue>(index);
+        values[VendorAudioBtMediaStatsReported::kBtCodecTypeFieldNumber - kVendorAtomOffset] = tmp;
+
+        tmp.set<VendorAtomValue::intValue>(duration_per_codec[index]);
+        values[VendorAudioBtMediaStatsReported::kActiveSecondsPerDayFieldNumber -
+               kVendorAtomOffset] = tmp;
+
+        // Send vendor atom to IStats HAL
+        VendorAtom event = {.reverseDomainName = "",
+                            .atomId = PixelAtoms::Atom::kVendorAudioBtMediaStatsReported,
+                            .values = std::move(values)};
+
+        const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+        if (!ret.isOk())
+            ALOGE("Unable to report VendorAudioBtMediaStatsReported at index %d", index);
+        else
+            ALOGD("Reporting VendorAudioBtMediaStatsReported: codec:%d, duration:%d", index,
+                  duration_per_codec[index]);
+    }
+}
+
+/**
+ * Logs the Resume Latency stats.
+ */
+void SysfsCollector::logVendorResumeLatencyStats(const std::shared_ptr<IStats> &stats_client) {
+    std::string uart_enabled = android::base::GetProperty("init.svc.console", "");
+    if (uart_enabled == "running") {
+        return;
+    }
+    std::string file_contents;
+    if (!kResumeLatencyMetricsPath) {
+        ALOGE("ResumeLatencyMetrics path not specified");
+        return;
+    }
+    if (!ReadFileToString(kResumeLatencyMetricsPath, &file_contents)) {
+        ALOGE("Unable to ResumeLatencyMetric %s - %s", kResumeLatencyMetricsPath, strerror(errno));
+        return;
+    }
+
+    int offset = 0;
+    int bytes_read;
+    const char *data = file_contents.c_str();
+    int data_len = file_contents.length();
+
+    int curr_bucket_cnt;
+    if (!sscanf(data + offset, "Resume Latency Bucket Count: %d\n%n", &curr_bucket_cnt,
+                &bytes_read))
+        return;
+    offset += bytes_read;
+    if (offset >= data_len)
+        return;
+
+    int64_t max_latency;
+    if (!sscanf(data + offset, "Max Resume Latency: %" PRId64 "\n%n", &max_latency, &bytes_read))
+        return;
+    offset += bytes_read;
+    if (offset >= data_len)
+        return;
+
+    uint64_t sum_latency;
+    if (!sscanf(data + offset, "Sum Resume Latency: %" PRIu64 "\n%n", &sum_latency, &bytes_read))
+        return;
+    offset += bytes_read;
+    if (offset >= data_len)
+        return;
+
+    if (curr_bucket_cnt > kMaxResumeLatencyBuckets)
+        return;
+    if (curr_bucket_cnt != prev_data.bucket_cnt) {
+        prev_data.resume_latency_buckets.clear();
+    }
+
+    int64_t total_latency_cnt = 0;
+    int64_t count;
+    int index = 2;
+    std::vector<VendorAtomValue> values(curr_bucket_cnt + 2);
     VendorAtomValue tmp;
-    tmp.set<VendorAtomValue::intValue>(milli_ams_rate);
+    // Iterate over resume latency buckets to get latency count within some latency thresholds
+    while (sscanf(data + offset, "%*ld - %*ldms ====> %" PRId64 "\n%n", &count, &bytes_read) == 1 ||
+           sscanf(data + offset, "%*ld - infms ====> %" PRId64 "\n%n", &count, &bytes_read) == 1) {
+        offset += bytes_read;
+        if (offset >= data_len && (index + 1 < curr_bucket_cnt + 2))
+            return;
+        if (curr_bucket_cnt == prev_data.bucket_cnt) {
+            tmp.set<VendorAtomValue::longValue>(count -
+                                                prev_data.resume_latency_buckets[index - 2]);
+            prev_data.resume_latency_buckets[index - 2] = count;
+        } else {
+            tmp.set<VendorAtomValue::longValue>(count);
+            prev_data.resume_latency_buckets.push_back(count);
+        }
+        if (index >= curr_bucket_cnt + 2)
+            return;
+        values[index] = tmp;
+        index += 1;
+        total_latency_cnt += count;
+    }
+    tmp.set<VendorAtomValue::longValue>(max_latency);
     values[0] = tmp;
+    if ((sum_latency - prev_data.resume_latency_sum_ms < 0) ||
+        (total_latency_cnt - prev_data.resume_count <= 0)) {
+        tmp.set<VendorAtomValue::longValue>(-1);
+        ALOGI("average resume latency get overflow");
+    } else {
+        tmp.set<VendorAtomValue::longValue>(
+                (int64_t)(sum_latency - prev_data.resume_latency_sum_ms) /
+                (total_latency_cnt - prev_data.resume_count));
+    }
+    values[1] = tmp;
+
+    prev_data.resume_latency_sum_ms = sum_latency;
+    prev_data.resume_count = total_latency_cnt;
+    prev_data.bucket_cnt = curr_bucket_cnt;
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kVendorResumeLatencyStats,
+                        .values = std::move(values)};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk())
+        ALOGE("Unable to report VendorResumeLatencyStats to Stats service");
+}
+
+/**
+ * Read and store top 5 irq stats.
+ */
+void process_irqatom_values(std::string file_contents, int *offset,
+                            std::vector<VendorAtomValue> *values) {
+    const char *data = file_contents.c_str();
+    int bytes_read;
+    int64_t irq_data;
+    int irq_num;
+
+    std::vector<std::pair<int, int64_t>> irq_pair;
+
+    while (sscanf(data + *offset, "%d %" PRId64 "\n%n", &irq_num, &irq_data, &bytes_read) == 2) {
+        irq_pair.push_back(std::make_pair(irq_num, irq_data));
+        *offset += bytes_read;
+    }
+    VendorAtomValue tmp;
+    int irq_stats_size = irq_pair.size();
+    for (int i = 0; i < 5; i++) {
+        if (irq_stats_size < 5 && i >= irq_stats_size) {
+            tmp.set<VendorAtomValue::longValue>(-1);
+            values->push_back(tmp);
+            tmp.set<VendorAtomValue::longValue>(0);
+            values->push_back(tmp);
+        } else {
+            tmp.set<VendorAtomValue::longValue>(irq_pair[i].first);
+            values->push_back(tmp);
+            tmp.set<VendorAtomValue::longValue>(irq_pair[i].second);
+            values->push_back(tmp);
+        }
+    }
+}
+
+/**
+ * Logs the Long irq stats.
+ */
+void SysfsCollector::logVendorLongIRQStatsReported(const std::shared_ptr<IStats> &stats_client) {
+    std::string uart_enabled = android::base::GetProperty("init.svc.console", "");
+    if (uart_enabled == "running") {
+        return;
+    }
+    std::string irq_file_contents, storm_file_contents;
+    if (kLongIRQMetricsPath == nullptr || strlen(kLongIRQMetricsPath) == 0) {
+        ALOGV("LongIRQ path not specified");
+        return;
+    }
+    if (!ReadFileToString(kLongIRQMetricsPath, &irq_file_contents)) {
+        ALOGE("Unable to read LongIRQ %s - %s", kLongIRQMetricsPath, strerror(errno));
+        return;
+    }
+    if (kStormIRQMetricsPath == nullptr || strlen(kStormIRQMetricsPath) == 0) {
+        ALOGV("StormIRQ path not specified");
+        return;
+    }
+    if (!ReadFileToString(kStormIRQMetricsPath, &storm_file_contents)) {
+        ALOGE("Unable to read StormIRQ %s - %s", kStormIRQMetricsPath, strerror(errno));
+        return;
+    }
+    if (kIRQStatsResetPath == nullptr || strlen(kIRQStatsResetPath) == 0) {
+        ALOGV("IRQStatsReset path not specified");
+        return;
+    }
+    int offset = 0;
+    int bytes_read;
+    const char *data = irq_file_contents.c_str();
+
+    // Get, process softirq stats
+    int64_t irq_count;
+    if (sscanf(data + offset, "long SOFTIRQ count: %" PRId64 "\n%n", &irq_count, &bytes_read) != 1)
+        return;
+    offset += bytes_read;
+    std::vector<VendorAtomValue> values;
+    VendorAtomValue tmp;
+    tmp.set<VendorAtomValue::longValue>(irq_count);
+    values.push_back(tmp);
+
+    if (sscanf(data + offset, "long SOFTIRQ detail (num, latency):\n%n", &bytes_read) != 0)
+        return;
+    offset += bytes_read;
+    process_irqatom_values(data, &offset, &values);
+
+    // Get, process irq stats
+    if (sscanf(data + offset, "long IRQ count: %" PRId64 "\n%n", &irq_count, &bytes_read) != 1)
+        return;
+    offset += bytes_read;
+    tmp.set<VendorAtomValue::longValue>(irq_count);
+    values.push_back(tmp);
+
+    if (sscanf(data + offset, "long IRQ detail (num, latency):\n%n", &bytes_read) != 0)
+        return;
+    offset += bytes_read;
+    process_irqatom_values(data, &offset, &values);
+
+    // Get, process storm irq stats
+    offset = 0;
+    data = storm_file_contents.c_str();
+    if (sscanf(data + offset, "storm IRQ detail (num, storm_count):\n%n", &bytes_read) != 0)
+        return;
+    offset += bytes_read;
+    process_irqatom_values(data, &offset, &values);
 
     // Send vendor atom to IStats HAL
     VendorAtom event = {.reverseDomainName = "",
-                        .atomId = PixelAtoms::Atom::kVendorAudioHardwareStatsReported,
+                        .atomId = PixelAtoms::Atom::kVendorLongIrqStatsReported,
+                        .values = std::move(values)};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk())
+        ALOGE("Unable to report kVendorLongIRQStatsReported to Stats service");
+
+    // Reset irq stats
+    if (!WriteStringToFile(std::to_string(1), kIRQStatsResetPath)) {
+        ALOGE("Failed to write to stats_reset");
+        return;
+    }
+}
+
+void SysfsCollector::logPartitionUsedSpace(const std::shared_ptr<IStats> &stats_client) {
+    struct statfs fs_info;
+    char path[] = "/mnt/vendor/persist";
+
+    if (statfs(path, &fs_info) == -1) {
+        ALOGE("statfs: %s", strerror(errno));
+        return;
+    }
+
+    // Load values array
+    std::vector<VendorAtomValue> values(3);
+    values[PartitionsUsedSpaceReported::kDirectoryFieldNumber - kVendorAtomOffset] =
+                    VendorAtomValue::make<VendorAtomValue::intValue>
+                        (PixelAtoms::PartitionsUsedSpaceReported::PERSIST);
+    values[PartitionsUsedSpaceReported::kFreeBytesFieldNumber - kVendorAtomOffset] =
+            VendorAtomValue::make<VendorAtomValue::longValue>(fs_info.f_bsize * fs_info.f_bfree);
+    values[PartitionsUsedSpaceReported::kTotalBytesFieldNumber - kVendorAtomOffset] =
+            VendorAtomValue::make<VendorAtomValue::longValue>(fs_info.f_bsize * fs_info.f_blocks);
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kPartitionUsedSpaceReported,
                         .values = std::move(values)};
 
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report VendorAudioHardwareStatsReported to Stats service");
+    if (!ret.isOk()) {
+        ALOGE("Unable to report Partitions Used Space Reported to stats service");
+    }
+}
+
+void SysfsCollector::logPcieLinkStats(const std::shared_ptr<IStats> &stats_client) {
+    struct sysfs_map {
+        const char *sysfs_path;
+        bool is_counter;
+        int modem_val;
+        int wifi_val;
+        int modem_msg_field_number;
+        int wifi_msg_field_number;
+    };
+
+    int i;
+    bool reportPcieLinkStats = false;
+
+    /* Map sysfs data to PcieLinkStatsReported message elements */
+    struct sysfs_map datamap[] = {
+        {"link_down_irqs", true, 0, 0,
+         PcieLinkStatsReported::kModemPcieLinkdownsFieldNumber,
+         PcieLinkStatsReported::kWifiPcieLinkdownsFieldNumber},
+
+        {"complete_timeout_irqs", true, 0, 0,
+         PcieLinkStatsReported::kModemPcieCompletionTimeoutsFieldNumber,
+         PcieLinkStatsReported::kWifiPcieCompletionTimeoutsFieldNumber},
+
+        {"link_up_failures", true, 0, 0,
+         PcieLinkStatsReported::kModemPcieLinkupFailuresFieldNumber,
+         PcieLinkStatsReported::kWifiPcieLinkupFailuresFieldNumber},
+
+        {"link_recovery_failures", true, 0, 0,
+         PcieLinkStatsReported::kModemPcieLinkRecoveryFailuresFieldNumber,
+         PcieLinkStatsReported::kWifiPcieLinkRecoveryFailuresFieldNumber},
+
+        {"pll_lock_average", false, 0, 0,
+         PcieLinkStatsReported::kModemPciePllLockAvgFieldNumber,
+         PcieLinkStatsReported::kWifiPciePllLockAvgFieldNumber},
+
+        {"link_up_average", false, 0, 0,
+         PcieLinkStatsReported::kModemPcieLinkUpAvgFieldNumber,
+         PcieLinkStatsReported::kWifiPcieLinkUpAvgFieldNumber },
+    };
+
+
+    if (kModemPcieLinkStatsPath == nullptr) {
+        ALOGD("Modem PCIe stats path not specified");
+    } else {
+        for (i=0; i < ARRAY_SIZE(datamap); i++) {
+            std::string modempath =
+                    std::string(kModemPcieLinkStatsPath) + "/" + datamap[i].sysfs_path;
+
+            if (ReadFileToInt(modempath, &(datamap[i].modem_val))) {
+                reportPcieLinkStats = true;
+                ALOGD("Modem %s = %d", datamap[i].sysfs_path,
+                      datamap[i].modem_val);
+                if (datamap[i].is_counter) {
+                    std::string value = std::to_string(datamap[i].modem_val);
+                    /* Writing the value back clears the counter */
+                    if (!WriteStringToFile(value, modempath)) {
+                        ALOGE("Unable to clear modem PCIe statistics file: %s - %s",
+                              modempath.c_str(), strerror(errno));
+                    }
+                }
+            }
+        }
+    }
+
+    if (kWifiPcieLinkStatsPath == nullptr) {
+        ALOGD("Wifi PCIe stats path not specified");
+    } else {
+        for (i=0; i < ARRAY_SIZE(datamap); i++) {
+            std::string wifipath =
+                    std::string(kWifiPcieLinkStatsPath) + "/" + datamap[i].sysfs_path;
+
+            if (ReadFileToInt(wifipath, &(datamap[i].wifi_val))) {
+                reportPcieLinkStats = true;
+                ALOGD("Wifi %s = %d", datamap[i].sysfs_path,
+                      datamap[i].wifi_val);
+                if (datamap[i].is_counter) {
+                    std::string value = std::to_string(datamap[i].wifi_val);
+                    /* Writing the value back clears the counter */
+                    if (!WriteStringToFile(value, wifipath)) {
+                        ALOGE("Unable to clear wifi PCIe statistics file: %s - %s",
+                              wifipath.c_str(), strerror(errno));
+                    }
+                }
+            }
+        }
+    }
+
+    if (!reportPcieLinkStats) {
+        ALOGD("No PCIe link stats to report");
+        return;
+    }
+
+    // Load values array
+    std::vector<VendorAtomValue> values(2 * ARRAY_SIZE(datamap));
+    VendorAtomValue tmp;
+    for (i=0; i < ARRAY_SIZE(datamap); i++) {
+        if (datamap[i].modem_val > 0) {
+            tmp.set<VendorAtomValue::intValue>(datamap[i].modem_val);
+            values[datamap[i].modem_msg_field_number - kVendorAtomOffset] = tmp;
+        }
+        if (datamap[i].wifi_val > 0) {
+            tmp.set<VendorAtomValue::intValue>(datamap[i].wifi_val);
+            values[datamap[i].wifi_msg_field_number - kVendorAtomOffset] = tmp;
+        }
+    }
+
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kPcieLinkStats,
+                        .values = std::move(values)};
+
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk()) {
+        ALOGE("Unable to report PCIe link statistics to stats service");
+    }
+}
+
+/**
+ * Read the contents of kPowerMitigationDurationPath and report them.
+ */
+void SysfsCollector::logMitigationDurationCounts(const std::shared_ptr<IStats> &stats_client) {
+    if (kPowerMitigationDurationPath == nullptr || strlen(kPowerMitigationDurationPath) == 0) {
+        ALOGE("Mitigation Duration path is invalid!");
+        return;
+    }
+    mitigation_duration_reporter_.logMitigationDuration(stats_client, kPowerMitigationDurationPath);
 }
 
 void SysfsCollector::logPerDay() {
@@ -1032,7 +2070,9 @@ void SysfsCollector::logPerDay() {
     logBlockStatsReported(stats_client);
     logCodec1Failed(stats_client);
     logCodecFailed(stats_client);
+    logDisplayStats(stats_client);
     logF2fsStats(stats_client);
+    logF2fsAtomicWriteInfo(stats_client);
     logF2fsCompressionInfo(stats_client);
     logF2fsGcSegmentInfo(stats_client);
     logF2fsSmartIdleMaintEnabled(stats_client);
@@ -1046,10 +2086,40 @@ void SysfsCollector::logPerDay() {
     mm_metrics_reporter_.logPixelMmMetricsPerDay(stats_client);
     logVendorAudioHardwareStats(stats_client);
     logThermalStats(stats_client);
+    logTempResidencyStats(stats_client);
+    logVendorLongIRQStatsReported(stats_client);
+    logVendorResumeLatencyStats(stats_client);
+    logPartitionUsedSpace(stats_client);
+    logPcieLinkStats(stats_client);
+    logMitigationDurationCounts(stats_client);
+    logVendorAudioPdmStatsReported(stats_client);
+    logWavesStats(stats_client);
+    logAdaptedInfoStats(stats_client);
+    logPcmUsageStats(stats_client);
+    logOffloadEffectsStats(stats_client);
+    logBluetoothAudioUsage(stats_client);
 }
 
 void SysfsCollector::aggregatePer5Min() {
     mm_metrics_reporter_.aggregatePixelMmMetricsPer5Min();
+}
+
+void SysfsCollector::logBrownout() {
+    const std::shared_ptr<IStats> stats_client = getStatsService();
+    if (!stats_client) {
+        ALOGE("Unable to get AIDL Stats service");
+        return;
+    }
+    if (kBrownoutCsvPath != nullptr && strlen(kBrownoutCsvPath) > 0)
+        brownout_detected_reporter_.logBrownoutCsv(stats_client, kBrownoutCsvPath,
+                                                   kBrownoutReasonProp);
+    else if (kBrownoutLogPath != nullptr && strlen(kBrownoutLogPath) > 0)
+        brownout_detected_reporter_.logBrownout(stats_client, kBrownoutLogPath,
+                                                kBrownoutReasonProp);
+}
+
+void SysfsCollector::logOnce() {
+    logBrownout();
 }
 
 void SysfsCollector::logPerHour() {
@@ -1083,6 +2153,7 @@ void SysfsCollector::collect(void) {
     aggregatePer5Min();
 
     // Collect first set of stats on boot.
+    logOnce();
     logPerHour();
     logPerDay();
 

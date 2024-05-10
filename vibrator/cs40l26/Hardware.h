@@ -15,6 +15,8 @@
  */
 #pragma once
 
+#include <glob.h>
+
 #include <algorithm>
 
 #include "HardwareBase.h"
@@ -67,6 +69,7 @@ namespace vibrator {
 class HwApi : public Vibrator::HwApi, private HwApiBase {
   public:
     HwApi() {
+        HwApi::initFF();
         open("calibration/f0_stored", &mF0);
         open("default/f0_offset", &mF0Offset);
         open("calibration/redc_stored", &mRedc);
@@ -92,39 +95,147 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     bool setF0CompEnable(bool value) override { return set(value, &mF0CompEnable); }
     bool setRedcCompEnable(bool value) override { return set(value, &mRedcCompEnable); }
     bool setMinOnOffInterval(uint32_t value) override { return set(value, &mMinOnOffInterval); }
+    uint32_t getContextScale() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.scale", 100);
+    }
+    bool getContextEnable() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.enable", false);
+    }
+    uint32_t getContextSettlingTime() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.settlingtime", 3000);
+    }
+    uint32_t getContextCooldownTime() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.cooldowntime", 1000);
+    }
+    bool getContextFadeEnable() override {
+        return utils::getProperty("persist.vendor.vibrator.hal.context.fade", false);
+    }
+
     // TODO(b/234338136): Need to add the force feedback HW API test cases
-    bool setFFGain(int fd, uint16_t value) override {
+    bool initFF() override {
+        ATRACE_NAME(__func__);
+        const std::string INPUT_EVENT_NAME = std::getenv("INPUT_EVENT_NAME") ?: "";
+        if (INPUT_EVENT_NAME.find("cs40l26") == std::string::npos) {
+            ALOGE("Invalid input name: %s", INPUT_EVENT_NAME.c_str());
+            return false;
+        }
+
+        glob_t g = {};
+        const std::string INPUT_EVENT_PATH = "/dev/input/event*";
+        int fd = -1, ret;
+        uint32_t val = 0;
+        char str[256] = {0x00};
+        // Scan /dev/input/event* to get the correct input device path for FF effects manipulation.
+        // Then constructs the /sys/class/input/event*/../../../ for driver attributes accessing
+        // across different platforms and different kernels.
+        for (uint8_t retry = 1; retry < 11 && !mInputFd.ok(); retry++) {
+            ret = glob(INPUT_EVENT_PATH.c_str(), 0, nullptr, &g);
+            if (ret) {
+                ALOGE("Failed to get input event paths (%d): %s", errno, strerror(errno));
+            } else {
+                for (size_t i = 0; i < g.gl_pathc; i++) {
+                    fd = TEMP_FAILURE_RETRY(::open(g.gl_pathv[i], O_RDWR));
+                    if (fd < 0) {
+                        continue;
+                    }
+                    // Determine the input device path:
+                    // 1. Check if EV_FF is flagged in event bits.
+                    // 2. Match device name(s) with this CS40L26 HAL instance.
+                    if (ioctl(fd, EVIOCGBIT(0, sizeof(val)), &val) > 0 && (val & (1 << EV_FF)) &&
+                        ioctl(fd, EVIOCGNAME(sizeof(str)), &str) > 0 &&
+                        strcmp(str, INPUT_EVENT_NAME.c_str()) == 0) {
+                        // Get fd ready for input event ioctl().
+                        mInputFd.reset(fd);  // mInputFd.ok() becomes true.
+                        ALOGI("Control %s through %s", INPUT_EVENT_NAME.c_str(), g.gl_pathv[i]);
+
+                        std::string path = g.gl_pathv[i];
+                        // Get fstream ready for input event write().
+                        saveName(path, &mInputIoStream);
+                        mInputIoStream.open(
+                                path, std::fstream::out | std::fstream::in | std::fstream::binary);
+                        if (!mInputIoStream) {
+                            ALOGE("Failed to open %s (%d): %s", path.c_str(), errno,
+                                  strerror(errno));
+                        }
+
+                        // Construct the sysfs device path.
+                        path = "/sys/class/input/" +
+                               path.substr(path.find("event"), std::string::npos) + "/../../../";
+                        updatePathPrefix(path);
+                        break;
+                    }
+                    close(fd);
+                    memset(str, 0x00, sizeof(str));
+                    val = 0;
+                }
+            }
+
+            if (!mInputFd.ok()) {
+                sleep(1);
+                ALOGW("Retry #%d to search in %zu input devices...", retry, g.gl_pathc);
+            }
+        }
+        globfree(&g);
+
+        if (!mInputFd.ok()) {
+            ALOGE("Failed to get an input event with name %s", INPUT_EVENT_NAME.c_str());
+            return false;
+        }
+
+        return true;
+    }
+    bool setFFGain(uint16_t value) override {
+        ATRACE_NAME(StringPrintf("%s %d%%", __func__, value).c_str());
         struct input_event gain = {
                 .type = EV_FF,
                 .code = FF_GAIN,
                 .value = value,
         };
-        if (write(fd, (const void *)&gain, sizeof(gain)) != sizeof(gain)) {
+        if (value > 100) {
+            ALOGE("Invalid gain");
             return false;
         }
+        mInputIoStream.write((const char *)&gain, sizeof(gain));
+        mInputIoStream.flush();
+        if (mInputIoStream.fail()) {
+            ALOGE("setFFGain fail");
+            return false;
+        }
+        HWAPI_RECORD(StringPrintf("%d%%", value), &mInputIoStream);
         return true;
     }
-    bool setFFEffect(int fd, struct ff_effect *effect, uint16_t timeoutMs) override {
-        if (((*effect).replay.length != timeoutMs) || (ioctl(fd, EVIOCSFF, effect) < 0)) {
+    bool setFFEffect(struct ff_effect *effect, uint16_t timeoutMs) override {
+        ATRACE_NAME(StringPrintf("%s %dms", __func__, timeoutMs).c_str());
+        if (effect == nullptr) {
+            ALOGE("Invalid ff_effect");
+            return false;
+        }
+        if (((*effect).replay.length != timeoutMs) || (ioctl(mInputFd, EVIOCSFF, effect) < 0)) {
             ALOGE("setFFEffect fail");
             return false;
-        } else {
-            return true;
         }
+        HWAPI_RECORD(StringPrintf("#%d: %dms", (*effect).id, (*effect).replay.length),
+                     &mInputIoStream);
+        return true;
     }
-    bool setFFPlay(int fd, int8_t index, bool value) override {
+    bool setFFPlay(int8_t index, bool value) override {
+        ATRACE_NAME(StringPrintf("%s index:%d %s", __func__, index, value ? "on" : "off").c_str());
         struct input_event play = {
                 .type = EV_FF,
                 .code = static_cast<uint16_t>(index),
                 .value = value,
         };
-        if (write(fd, (const void *)&play, sizeof(play)) != sizeof(play)) {
+        mInputIoStream.write((const char *)&play, sizeof(play));
+        mInputIoStream.flush();
+        if (mInputIoStream.fail()) {
+            ALOGE("setFFPlay fail");
             return false;
-        } else {
-            return true;
         }
+        HWAPI_RECORD(StringPrintf("#%d: %b", index, value), &mInputIoStream);
+        return true;
     }
     bool getHapticAlsaDevice(int *card, int *device) override {
+        ATRACE_NAME(__func__);
         std::string line;
         std::ifstream myfile(PROC_SND_PCM);
         if (myfile.is_open()) {
@@ -134,6 +245,7 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
                     std::string currentToken;
                     std::getline(ss, currentToken, ':');
                     sscanf(currentToken.c_str(), "%d-%d", card, device);
+                    saveName(StringPrintf("/dev/snd/pcmC%uD%up", *card, *device), &mPcmStream);
                     return true;
                 }
             }
@@ -144,6 +256,7 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         return false;
     }
     bool setHapticPcmAmp(struct pcm **haptic_pcm, bool enable, int card, int device) override {
+        ATRACE_NAME(StringPrintf("%s %s", __func__, enable ? "enable" : "disable").c_str());
         int ret = 0;
 
         if (enable) {
@@ -152,23 +265,27 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
                 ALOGE("cannot open pcm_out driver: %s", pcm_get_error(*haptic_pcm));
                 goto fail;
             }
+            HWAPI_RECORD(std::string("pcm_open"), &mPcmStream);
 
             ret = pcm_prepare(*haptic_pcm);
             if (ret < 0) {
                 ALOGE("cannot prepare haptic_pcm: %s", pcm_get_error(*haptic_pcm));
                 goto fail;
             }
+            HWAPI_RECORD(std::string("pcm_prepare"), &mPcmStream);
 
             ret = pcm_start(*haptic_pcm);
             if (ret < 0) {
                 ALOGE("cannot start haptic_pcm: %s", pcm_get_error(*haptic_pcm));
                 goto fail;
             }
+            HWAPI_RECORD(std::string("pcm_start"), &mPcmStream);
 
             return true;
         } else {
             if (*haptic_pcm) {
                 pcm_close(*haptic_pcm);
+                HWAPI_RECORD(std::string("pcm_close"), &mPcmStream);
                 *haptic_pcm = NULL;
             }
             return true;
@@ -176,19 +293,27 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
 
     fail:
         pcm_close(*haptic_pcm);
+        HWAPI_RECORD(std::string("pcm_close"), &mPcmStream);
         *haptic_pcm = NULL;
         return false;
     }
-    bool uploadOwtEffect(int fd, uint8_t *owtData, uint32_t numBytes, struct ff_effect *effect,
+    bool isPassthroughI2sHapticSupported() override {
+        return utils::getProperty("ro.vendor.vibrator.hal.passthrough_i2s_supported", false);
+    }
+    bool uploadOwtEffect(const uint8_t *owtData, const uint32_t numBytes, struct ff_effect *effect,
                          uint32_t *outEffectIndex, int *status) override {
-        (*effect).u.periodic.custom_len = numBytes / sizeof(uint16_t);
-        delete[] ((*effect).u.periodic.custom_data);
-        (*effect).u.periodic.custom_data = new int16_t[(*effect).u.periodic.custom_len]{0x0000};
-        if ((*effect).u.periodic.custom_data == nullptr) {
-            ALOGE("Failed to allocate memory for custom data\n");
+        ATRACE_NAME(__func__);
+        if (owtData == nullptr || effect == nullptr || outEffectIndex == nullptr) {
+            ALOGE("Invalid argument owtData, ff_effect or outEffectIndex");
             *status = EX_NULL_POINTER;
             return false;
         }
+        if (status == nullptr) {
+            ALOGE("Invalid argument status");
+            return false;
+        }
+
+        (*effect).u.periodic.custom_len = numBytes / sizeof(uint16_t);
         memcpy((*effect).u.periodic.custom_data, owtData, numBytes);
 
         if ((*effect).id != -1) {
@@ -197,9 +322,8 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
 
         /* Create a new OWT waveform to update the PWLE or composite effect. */
         (*effect).id = -1;
-        if (ioctl(fd, EVIOCSFF, effect) < 0) {
+        if (ioctl(mInputFd, EVIOCSFF, effect) < 0) {
             ALOGE("Failed to upload effect %d (%d): %s", *outEffectIndex, errno, strerror(errno));
-            delete[] ((*effect).u.periodic.custom_data);
             *status = EX_ILLEGAL_STATE;
             return false;
         }
@@ -211,19 +335,25 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         }
         *outEffectIndex = (*effect).id;
         *status = 0;
+        HWAPI_RECORD(StringPrintf("#%d: %dB", *outEffectIndex, numBytes), &mInputIoStream);
         return true;
     }
-    bool eraseOwtEffect(int fd, int8_t effectIndex, std::vector<ff_effect> *effect) override {
+    bool eraseOwtEffect(int8_t effectIndex, std::vector<ff_effect> *effect) override {
+        ATRACE_NAME(__func__);
         uint32_t effectCountBefore, effectCountAfter, i, successFlush = 0;
 
         if (effectIndex < WAVEFORM_MAX_PHYSICAL_INDEX) {
             ALOGE("Invalid waveform index for OWT erase: %d", effectIndex);
             return false;
         }
+        if (effect == nullptr || (*effect).empty()) {
+            ALOGE("Invalid argument effect");
+            return false;
+        }
 
         if (effectIndex < WAVEFORM_MAX_INDEX) {
             /* Normal situation. Only erase the effect which we just played. */
-            if (ioctl(fd, EVIOCRMFF, effectIndex) < 0) {
+            if (ioctl(mInputFd, EVIOCRMFF, effectIndex) < 0) {
                 ALOGE("Failed to erase effect %d (%d): %s", effectIndex, errno, strerror(errno));
             }
             for (i = WAVEFORM_MAX_PHYSICAL_INDEX; i < WAVEFORM_MAX_INDEX; i++) {
@@ -232,12 +362,14 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
                     break;
                 }
             }
+            HWAPI_RECORD(StringPrintf("#%d", effectIndex), &mInputIoStream);
         } else {
             /* Flush all non-prestored effects of ff-core and driver. */
             getEffectCount(&effectCountBefore);
             for (i = WAVEFORM_MAX_PHYSICAL_INDEX; i < FF_MAX_EFFECTS; i++) {
-                if (ioctl(fd, EVIOCRMFF, i) >= 0) {
+                if (ioctl(mInputFd, EVIOCRMFF, i) >= 0) {
                     successFlush++;
+                    HWAPI_RECORD(StringPrintf("#%d", i), &mInputIoStream);
                 }
             }
             getEffectCount(&effectCountAfter);
@@ -250,10 +382,57 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         }
         return true;
     }
+    bool isDbcSupported() override {
+        ATRACE_NAME(__func__);
+        return utils::getProperty("ro.vendor.vibrator.hal.dbc.enable", false);
+    }
+
+    bool enableDbc() override {
+        ATRACE_NAME(__func__);
+        if (isDbcSupported()) {
+            open("dbc/dbc_env_rel_coef", &mDbcEnvRelCoef);
+            open("dbc/dbc_rise_headroom", &mDbcRiseHeadroom);
+            open("dbc/dbc_fall_headroom", &mDbcFallHeadroom);
+            open("dbc/dbc_tx_lvl_thresh_fs", &mDbcTxLvlThreshFs);
+            open("dbc/dbc_tx_lvl_hold_off_ms", &mDbcTxLvlHoldOffMs);
+            open("default/pm_active_timeout_ms", &mPmActiveTimeoutMs);
+            open("dbc/dbc_enable", &mDbcEnable);
+
+            // Set values from config. Default if not found.
+            set(utils::getProperty("ro.vendor.vibrator.hal.dbc.envrelcoef", kDbcDefaultEnvRelCoef),
+                &mDbcEnvRelCoef);
+            set(utils::getProperty("ro.vendor.vibrator.hal.dbc.riseheadroom",
+                                   kDbcDefaultRiseHeadroom),
+                &mDbcRiseHeadroom);
+            set(utils::getProperty("ro.vendor.vibrator.hal.dbc.fallheadroom",
+                                   kDbcDefaultFallHeadroom),
+                &mDbcFallHeadroom);
+            set(utils::getProperty("ro.vendor.vibrator.hal.dbc.txlvlthreshfs",
+                                   kDbcDefaultTxLvlThreshFs),
+                &mDbcTxLvlThreshFs);
+            set(utils::getProperty("ro.vendor.vibrator.hal.dbc.txlvlholdoffms",
+                                   kDbcDefaultTxLvlHoldOffMs),
+                &mDbcTxLvlHoldOffMs);
+            set(utils::getProperty("ro.vendor.vibrator.hal.pm.activetimeout",
+                                   kDefaultPmActiveTimeoutMs),
+                &mPmActiveTimeoutMs);
+            set(kDbcEnable, &mDbcEnable);
+            return true;
+        }
+        return false;
+    }
 
     void debug(int fd) override { HwApiBase::debug(fd); }
 
   private:
+    static constexpr uint32_t kDbcDefaultEnvRelCoef = 8353728;
+    static constexpr uint32_t kDbcDefaultRiseHeadroom = 1909602;
+    static constexpr uint32_t kDbcDefaultFallHeadroom = 1909602;
+    static constexpr uint32_t kDbcDefaultTxLvlThreshFs = 2516583;
+    static constexpr uint32_t kDbcDefaultTxLvlHoldOffMs = 0;
+    static constexpr uint32_t kDefaultPmActiveTimeoutMs = 5;
+    static constexpr uint32_t kDbcEnable = 1;
+
     std::ofstream mF0;
     std::ofstream mF0Offset;
     std::ofstream mRedc;
@@ -264,6 +443,18 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     std::ofstream mF0CompEnable;
     std::ofstream mRedcCompEnable;
     std::ofstream mMinOnOffInterval;
+    std::ofstream mInputIoStream;
+    std::ofstream mPcmStream;
+    ::android::base::unique_fd mInputFd;
+
+    // DBC Parameters
+    std::ofstream mDbcEnvRelCoef;
+    std::ofstream mDbcRiseHeadroom;
+    std::ofstream mDbcFallHeadroom;
+    std::ofstream mDbcTxLvlThreshFs;
+    std::ofstream mDbcTxLvlHoldOffMs;
+    std::ofstream mDbcEnable;
+    std::ofstream mPmActiveTimeoutMs;
 };
 
 class HwCal : public Vibrator::HwCal, private HwCalBase {
@@ -278,6 +469,8 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
 
     static constexpr uint32_t VERSION_DEFAULT = 2;
     static constexpr int32_t DEFAULT_FREQUENCY_SHIFT = 0;
+    static constexpr float DEFAULT_DEVICE_MASS = 0.21;
+    static constexpr float DEFAULT_LOC_COEFF = 2.5;
     static constexpr std::array<uint32_t, 2> V_TICK_DEFAULT = {1, 100};
     static constexpr std::array<uint32_t, 2> V_CLICK_DEFAULT = {1, 100};
     static constexpr std::array<uint32_t, 2> V_LONG_DEFAULT = {1, 100};
@@ -294,6 +487,12 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
     }
     bool getLongFrequencyShift(int32_t *value) override {
         return getProperty("long.frequency.shift", value, DEFAULT_FREQUENCY_SHIFT);
+    }
+    bool getDeviceMass(float *value) override {
+        return getProperty("device.mass", value, DEFAULT_DEVICE_MASS);
+    }
+    bool getLocCoeff(float *value) override {
+        return getProperty("loc.coeff", value, DEFAULT_LOC_COEFF);
     }
     bool getF0(std::string *value) override { return getPersist(F0_CONFIG, value); }
     bool getRedc(std::string *value) override { return getPersist(REDC_CONFIG, value); }
@@ -320,9 +519,7 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
         return true;
     }
     bool isChirpEnabled() override {
-        bool value;
-        getProperty("chirp.enabled", &value, false);
-        return value;
+        return utils::getProperty("persist.vendor.vibrator.hal.chirp.enabled", false);
     }
     bool getSupportedPrimitives(uint32_t *value) override {
         return getProperty("supported_primitives", value, (uint32_t)0);
@@ -334,7 +531,7 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
     }
     bool isRedcCompEnabled() override {
         bool value;
-        getProperty("redc.comp.enabled", &value, true);
+        getProperty("redc.comp.enabled", &value, false);
         return value;
     }
     void debug(int fd) override { HwCalBase::debug(fd); }

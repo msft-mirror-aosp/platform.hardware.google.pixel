@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,13 +27,13 @@
 
 #include "thermal_info.h"
 
+namespace aidl {
 namespace android {
 namespace hardware {
 namespace thermal {
-namespace V2_0 {
 namespace implementation {
 
-using android::base::boot_clock;
+using ::android::base::boot_clock;
 
 struct PowerSample {
     uint64_t energy_counter;
@@ -47,6 +47,12 @@ struct PowerStatus {
     float last_updated_avg_power;
 };
 
+struct PowerStatusLog {
+    boot_clock::time_point prev_log_time;
+    // energy sample at last logging
+    std::unordered_map<std::string, PowerSample> prev_energy_info_map;
+};
+
 // A helper class for monitoring power rails.
 class PowerFiles {
   public:
@@ -55,9 +61,15 @@ class PowerFiles {
     // Disallow copy and assign.
     PowerFiles(const PowerFiles &) = delete;
     void operator=(const PowerFiles &) = delete;
-    bool registerPowerRailsToWatch(std::string_view config_path);
+    bool registerPowerRailsToWatch(const Json::Value &config);
     // Update the power data from ODPM sysfs
     bool refreshPowerStatus(void);
+    // Log the power data for the duration
+    void logPowerStatus(const boot_clock::time_point &now);
+    // Get previous power log time_point
+    const boot_clock::time_point &GetPrevPowerLogTime() const {
+        return power_status_log_.prev_log_time;
+    }
     // Get power status map
     const std::unordered_map<std::string, PowerStatus> &GetPowerStatusMap() const {
         std::shared_lock<std::shared_mutex> _lock(power_status_map_mutex_);
@@ -86,10 +98,11 @@ class PowerFiles {
     std::unordered_map<std::string, PowerRailInfo> power_rail_info_map_;
     // The set to store the energy source paths
     std::unordered_set<std::string> energy_path_set_;
+    PowerStatusLog power_status_log_;
 };
 
 }  // namespace implementation
-}  // namespace V2_0
 }  // namespace thermal
 }  // namespace hardware
 }  // namespace android
+}  // namespace aidl

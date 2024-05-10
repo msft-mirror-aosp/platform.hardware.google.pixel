@@ -61,9 +61,11 @@ struct HintStatus {
 enum class HintActionType { Node, DoHint, EndHint, MaskHint };
 
 struct HintAction {
-    HintAction(HintActionType t, const std::string &v) : type(t), value(v) {}
+    HintAction(HintActionType t, const std::string &v, const std::string &p)
+        : type(t), value(v), enable_property(p) {}
     HintActionType type;
     std::string value;
+    std::string enable_property;
 };
 
 struct Hint {
@@ -122,6 +124,9 @@ class HintManager {
 
     // get current ADPF.
     std::shared_ptr<AdpfConfig> GetAdpfProfile() const;
+
+    // Query if given AdpfProfile supported.
+    bool IsAdpfProfileSupported(const std::string &name) const;
 
     // Static method to construct HintManager from the JSON config file.
     static std::unique_ptr<HintManager> GetFromJSON(

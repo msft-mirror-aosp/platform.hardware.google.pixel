@@ -39,7 +39,13 @@ using android::base::WriteStringToFile;
 using android::hardware::google::pixel::PixelAtoms::ChargeStats;
 using android::hardware::google::pixel::PixelAtoms::VoltageTierStats;
 
+#define DURATION_FILTER_SECS 15
+
 ChargeStatsReporter::ChargeStatsReporter() {}
+
+int64_t ChargeStatsReporter::getTimeSecs(void) {
+    return nanoseconds_to_seconds(systemTime(SYSTEM_TIME_BOOTTIME));
+}
 
 void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats_client,
                                             const std::string line, const std::string wline_at,
@@ -111,6 +117,8 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             tmp[12] = pca_rs[4];
             tmp[14] = pca_rs[1];
             if (wline_at.empty()) {
+                /* force adapter type to PPS when pca log is available, but not wlc */
+                tmp[0] = PixelAtoms::ChargeStats::ADAPTER_TYPE_USB_PD_PPS;
                 tmp[8] = pca_ac[0];
                 tmp[9] = pca_ac[1];
                 tmp[13] = pca_rs[0];
@@ -200,15 +208,35 @@ void ChargeStatsReporter::ReportVoltageTierStats(const std::shared_ptr<IStats> &
         ALOGE("Unable to report VoltageTierStats to Stats service");
 }
 
+/**
+ * b/223664185
+ * Adds a rolling window filter to charge stats. If the time has expired, there will be a new log
+ * event.
+ *
+ * This helps ensure that we throttle stats even if there is an intermittent disconnect, while still
+ * retaining some stats on the disconnect.
+ */
+bool ChargeStatsReporter::shouldReportEvent(void) {
+    const int64_t current_time = getTimeSecs();
+    if (current_time == 0) {
+        ALOGE("Current boot time is zero!");
+        return false;
+    }
+
+    if (log_event_time_secs_ == 0 || log_event_time_secs_ + DURATION_FILTER_SECS < current_time) {
+        log_event_time_secs_ = current_time;
+        return true;
+    }
+
+    return false;
+}
+
 void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_client,
                                          const std::string &path) {
     std::string file_contents, line, wfile_contents, wline_at, wline_ac, pca_file_contents,
-            pca_line, thermal_file_contents, gcharger_file_contents;
+            pca_line, thermal_file_contents, gcharger_file_contents, gdbatt_file_contents;
     std::istringstream ss;
-    bool has_wireless = wireless_charge_stats_.CheckWirelessContentsAndAck(&wfile_contents);
-    bool has_pca = pca_charge_stats_.CheckPcaContentsAndAck(&pca_file_contents);
-    bool has_thermal = checkContentsAndAck(&thermal_file_contents, kThermalChargeMetricsPath);
-    bool has_gcharger = checkContentsAndAck(&gcharger_file_contents, kGChargerMetricsPath);
+    bool has_wireless, has_pca, has_thermal, has_gcharger, has_dual_batt;
 
     if (!ReadFileToString(path.c_str(), &file_contents)) {
         ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
@@ -226,6 +254,12 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         ALOGE("Couldn't clear %s - %s", path.c_str(), strerror(errno));
     }
 
+    if (!shouldReportEvent()) {
+        ALOGW("Too many log events; event ignored.");
+        return;
+    }
+
+    has_pca = pca_charge_stats_.CheckPcaContentsAndAck(&pca_file_contents);
     if (has_pca) {
         std::istringstream pca_ss;
 
@@ -233,6 +267,7 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         std::getline(pca_ss, pca_line);
     }
 
+    has_wireless = wireless_charge_stats_.CheckWirelessContentsAndAck(&wfile_contents);
     if (has_wireless) {
         std::istringstream wss;
 
@@ -251,6 +286,7 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         ReportVoltageTierStats(stats_client, line.c_str(), has_wireless, wfile_contents);
     }
 
+    has_thermal = checkContentsAndAck(&thermal_file_contents, kThermalChargeMetricsPath);
     if (has_thermal) {
         std::istringstream wss;
         wss.str(thermal_file_contents);
@@ -259,9 +295,19 @@ void ChargeStatsReporter::checkAndReport(const std::shared_ptr<IStats> &stats_cl
         }
     }
 
+    has_gcharger = checkContentsAndAck(&gcharger_file_contents, kGChargerMetricsPath);
     if (has_gcharger) {
         std::istringstream wss;
         wss.str(gcharger_file_contents);
+        while (std::getline(wss, line)) {
+            ReportVoltageTierStats(stats_client, line.c_str());
+        }
+    }
+
+    has_dual_batt = checkContentsAndAck(&gdbatt_file_contents, kGDualBattMetricsPath);
+    if (has_dual_batt) {
+        std::istringstream wss;
+        wss.str(gdbatt_file_contents);
         while (std::getline(wss, line)) {
             ReportVoltageTierStats(stats_client, line.c_str());
         }

@@ -72,7 +72,9 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     bool setGpioFallScale(uint32_t value) override { return set(value, &mGpioFallScale); }
     bool setGpioRiseIndex(uint32_t value) override { return set(value, &mGpioRiseIndex); }
     bool setGpioRiseScale(uint32_t value) override { return set(value, &mGpioRiseScale); }
-    bool pollVibeState(bool value) override { return poll(value, &mVibeState); }
+    bool pollVibeState(uint32_t value, int32_t timeoutMs) override {
+        return poll(value, &mVibeState, timeoutMs);
+    }
     bool setClabEnable(bool value) override { return set(value, &mClabEnable); }
     bool getAvailablePwleSegments(uint32_t *value) override {
         return get(value, &mAvailablePwleSegments);
@@ -196,9 +198,7 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
         return true;
     }
     bool isChirpEnabled() override {
-        bool value;
-        getProperty("chirp.enabled", &value, false);
-        return value;
+        return utils::getProperty("persist.vendor.vibrator.hal.chirp.enabled", false);
     }
     void debug(int fd) override { HwCalBase::debug(fd); }
 };

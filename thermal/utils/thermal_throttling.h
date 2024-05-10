@@ -16,9 +16,10 @@
 
 #pragma once
 
-#include <android/hardware/thermal/2.0/IThermal.h>
+#include <aidl/android/hardware/thermal/Temperature.h>
 
 #include <queue>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -26,18 +27,13 @@
 
 #include "power_files.h"
 #include "thermal_info.h"
+#include "thermal_stats_helper.h"
 
+namespace aidl {
 namespace android {
 namespace hardware {
 namespace thermal {
-namespace V2_0 {
 namespace implementation {
-
-using ::android::hardware::hidl_vec;
-using ::android::hardware::thermal::V2_0::IThermal;
-using Temperature_2_0 = ::android::hardware::thermal::V2_0::Temperature;
-using ::android::hardware::thermal::V2_0::TemperatureThreshold;
-using ::android::hardware::thermal::V2_0::ThrottlingSeverity;
 
 struct ThermalThrottlingStatus {
     std::unordered_map<std::string, int> pid_power_budget_map;
@@ -51,6 +47,7 @@ struct ThermalThrottlingStatus {
     float prev_power_budget;
     float budget_transient;
     int tran_cycle;
+    std::string profile;
 };
 
 // Return the control temp target of PID algorithm
@@ -71,9 +68,6 @@ class ThermalThrottling {
     bool registerThermalThrottling(
             std::string_view sensor_name, const std::shared_ptr<ThrottlingInfo> &throttling_info,
             const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map);
-    // Register map for throttling release algo
-    bool registerThrottlingReleaseToWatch(std::string_view sensor_name, std::string_view cdev_name,
-                                          const BindedCdevInfo &binded_cdev_info);
     // Get throttling status map
     const std::unordered_map<std::string, ThermalThrottlingStatus> &GetThermalThrottlingStatusMap()
             const {
@@ -82,34 +76,41 @@ class ThermalThrottling {
     }
     // Update thermal throttling request for the specific sensor
     void thermalThrottlingUpdate(
-            const Temperature_2_0 &temp, const SensorInfo &sensor_info,
+            const Temperature &temp, const SensorInfo &sensor_info,
             const ThrottlingSeverity curr_severity, const std::chrono::milliseconds time_elapsed_ms,
             const std::unordered_map<std::string, PowerStatus> &power_status_map,
-            const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map);
+            const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map,
+            const bool max_throttling = false);
 
     // Compute the throttling target from all the sensors' request
     void computeCoolingDevicesRequest(std::string_view sensor_name, const SensorInfo &sensor_info,
                                       const ThrottlingSeverity curr_severity,
-                                      std::vector<std::string> *cooling_devices_to_update);
+                                      std::vector<std::string> *cooling_devices_to_update,
+                                      ThermalStatsHelper *thermal_stats_helper);
+    // Get the aggregated (from all sensor) max request for a cooling device
+    bool getCdevMaxRequest(std::string_view cdev_name, int *max_state);
 
   private:
+    // Check if the thermal throttling profile need to be switched
+    void parseProfileProperty(std::string_view sensor_name, const SensorInfo &sensor_info);
     // PID algo - get the total power budget
-    float updatePowerBudget(const Temperature_2_0 &temp, const SensorInfo &sensor_info,
+    float updatePowerBudget(const Temperature &temp, const SensorInfo &sensor_info,
                             std::chrono::milliseconds time_elapsed_ms,
-                            ThrottlingSeverity curr_severity);
+                            ThrottlingSeverity curr_severity, const bool max_throttling);
 
     // PID algo - return the power number from excluded power rail list
     float computeExcludedPower(const SensorInfo &sensor_info,
                                const ThrottlingSeverity curr_severity,
                                const std::unordered_map<std::string, PowerStatus> &power_status_map,
-                               std::string *log_buf);
+                               std::string *log_buf, std::string_view sensor_name);
 
     // PID algo - allocate the power to target CDEV according to the ODPM
     bool allocatePowerToCdev(
-            const Temperature_2_0 &temp, const SensorInfo &sensor_info,
+            const Temperature &temp, const SensorInfo &sensor_info,
             const ThrottlingSeverity curr_severity, const std::chrono::milliseconds time_elapsed_ms,
             const std::unordered_map<std::string, PowerStatus> &power_status_map,
-            const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map);
+            const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map,
+            const bool max_throttling);
     // PID algo - map the target throttling state according to the power budget
     void updateCdevRequestByPower(
             std::string sensor_name,
@@ -124,15 +125,20 @@ class ThermalThrottling {
             const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map,
             const std::unordered_map<std::string, PowerStatus> &power_status_map,
             const ThrottlingSeverity severity, const SensorInfo &sensor_info);
-
+    // Update the cooling device request set for new request and notify the caller if there is
+    // change in max_request for the cooling device.
+    bool updateCdevMaxRequestAndNotifyIfChange(std::string_view cdev_name, int cur_request,
+                                               int new_request);
     mutable std::shared_mutex thermal_throttling_status_map_mutex_;
     // Thermal throttling status from each sensor
     std::unordered_map<std::string, ThermalThrottlingStatus> thermal_throttling_status_map_;
-    std::vector<std::string> cooling_devices_to_update;
+    std::shared_mutex cdev_all_request_map_mutex_;
+    // Set of all request for a cooling device from each sensor
+    std::unordered_map<std::string, std::multiset<int, std::greater<int>>> cdev_all_request_map_;
 };
 
 }  // namespace implementation
-}  // namespace V2_0
 }  // namespace thermal
 }  // namespace hardware
 }  // namespace android
+}  // namespace aidl

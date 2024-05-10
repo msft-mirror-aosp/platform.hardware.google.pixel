@@ -1,5 +1,4 @@
-PRODUCT_PACKAGES += \
-    android.hardware.vibrator-service.cs40l26
+PRODUCT_PACKAGES += android.hardware.vibrator-service.cs40l26
 
 BOARD_SEPOLICY_DIRS += \
     hardware/google/pixel-sepolicy/vibrator/common \

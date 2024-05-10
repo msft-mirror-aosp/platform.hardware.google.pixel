@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <android-base/file.h>
+#include <android-base/properties.h>
 #include <bootloader_message/bootloader_message.h>
 #include <gtest/gtest.h>
 
@@ -95,6 +96,10 @@ TEST_F(MiscWriterTest, SetClearSota) {
   std::string expected = "enable-sota";
   CheckMiscPartitionVendorSpaceContent(32, expected);
 
+  expected = ::android::base::GetProperty("persist.vendor.nfc.factoryota.state", "");
+  if (expected.size() != 0 && expected.size() <= 40)
+    CheckMiscPartitionVendorSpaceContent(224, expected);
+
   // Test we can write to the override offset.
   size_t override_offset = 12360;
   ASSERT_FALSE(misc_writer_->PerformAction(override_offset));
@@ -104,6 +109,19 @@ TEST_F(MiscWriterTest, SetClearSota) {
   ASSERT_TRUE(misc_writer_->PerformAction());
   std::string zeros(expected.size(), 0);
   CheckMiscPartitionVendorSpaceContent(32, zeros);
+}
+
+TEST_F(MiscWriterTest, SetMaxRamSize) {
+  misc_writer_ = std::make_unique<MiscWriter>(MiscWriterActions::kSetMaxRamSize, "8192");
+  size_t offset = MiscWriter::kMaxRamSizeOffsetInVendorSpace;
+  ASSERT_TRUE(misc_writer_->PerformAction(offset));
+  std::string expected = std::string(MiscWriter::kMaxRamSize) + "8192";
+  CheckMiscPartitionVendorSpaceContent(offset, expected);
+
+  misc_writer_ = std::make_unique<MiscWriter>(MiscWriterActions::kClearMaxRamSize);
+  ASSERT_TRUE(misc_writer_->PerformAction(offset));
+  std::string zeros(expected.size(), 0);
+  CheckMiscPartitionVendorSpaceContent(offset, zeros);
 }
 
 TEST_F(MiscWriterTest, WriteMiscPartitionVendorSpace) {
