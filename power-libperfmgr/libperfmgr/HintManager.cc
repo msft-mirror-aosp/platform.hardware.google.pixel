@@ -281,9 +281,9 @@ bool HintManager::Start() {
     return nm_->Start();
 }
 
-std::shared_ptr<HintManager> HintManager::mInstance = nullptr;
+std::unique_ptr<HintManager> HintManager::sInstance = nullptr;
 
-std::shared_ptr<HintManager> HintManager::Reload(bool start) {
+void HintManager::Reload(bool start) {
     std::string config_path = "/vendor/etc/";
     if (android::base::GetBoolProperty(kConfigDebugPathProperty.data(), false)) {
         config_path = "/data/vendor/etc/";
@@ -295,18 +295,17 @@ std::shared_ptr<HintManager> HintManager::Reload(bool start) {
     LOG(INFO) << "Pixel Power HAL AIDL Service with Extension is starting with config: "
               << config_path;
     // Reload and start the HintManager
-    mInstance = HintManager::GetFromJSON(config_path, start);
-    if (!mInstance) {
+    HintManager::GetFromJSON(config_path, start);
+    if (!sInstance) {
         LOG(FATAL) << "Invalid config: " << config_path;
     }
-    return mInstance;
 }
 
-std::shared_ptr<HintManager> HintManager::GetInstance() {
-    if (!mInstance) {
-        mInstance = HintManager::Reload(false);
+HintManager *HintManager::GetInstance() {
+    if (sInstance == nullptr) {
+        HintManager::Reload(false);
     }
-    return mInstance;
+    return sInstance.get();
 }
 
 static std::optional<std::string> ParseGpuSysfsNode(const std::string &json_doc) {
@@ -325,8 +324,7 @@ static std::optional<std::string> ParseGpuSysfsNode(const std::string &json_doc)
     return {root["GpuSysfsPath"].asString()};
 }
 
-std::unique_ptr<HintManager> HintManager::GetFromJSON(
-    const std::string& config_path, bool start) {
+HintManager *HintManager::GetFromJSON(const std::string &config_path, bool start) {
     std::string json_doc;
 
     if (!android::base::ReadFileToString(config_path, &json_doc)) {
@@ -354,9 +352,9 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
     auto const gpu_sysfs_node = ParseGpuSysfsNode(json_doc);
 
     sp<NodeLooperThread> nm = new NodeLooperThread(std::move(nodes));
-    auto hm = std::make_unique<HintManager>(std::move(nm), actions, adpfs, gpu_sysfs_node);
+    sInstance = std::make_unique<HintManager>(std::move(nm), actions, adpfs, gpu_sysfs_node);
 
-    if (!HintManager::InitHintStatus(hm)) {
+    if (!HintManager::InitHintStatus(sInstance)) {
         LOG(ERROR) << "Failed to initialize hint status";
         return nullptr;
     }
@@ -364,9 +362,10 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
     LOG(INFO) << "Initialized HintManager from JSON config: " << config_path;
 
     if (start) {
-        hm->Start();
+        sInstance->Start();
     }
-    return hm;
+
+    return HintManager::GetInstance();
 }
 
 std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
@@ -672,6 +671,14 @@ std::unordered_map<std::string, Hint> HintManager::ParseActions(
     }                                                                                            \
     VARIABLE = adpfs[i][ENTRY].as##TYPE()
 
+#define ADPF_PARSE_OPTIONAL(VARIABLE, ENTRY, TYPE)                     \
+    static_assert(std::is_same<decltype(adpfs[i][ENTRY].as##TYPE()),   \
+                               decltype(VARIABLE)::value_type>::value, \
+                  "Parser type mismatch");                             \
+    if (!adpfs[i][ENTRY].empty() && adpfs[i][ENTRY].is##TYPE()) {      \
+        VARIABLE = adpfs[i][ENTRY].as##TYPE();                         \
+    }
+
 std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         const std::string &json_doc) {
     // function starts
@@ -694,6 +701,7 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     double staleTimeFactor;
     uint64_t reportingRate;
     double targetTimeFactor;
+
     std::vector<std::shared_ptr<AdpfConfig>> adpfs_parsed;
     std::set<std::string> name_parsed;
     Json::Value root;
@@ -708,6 +716,7 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     for (Json::Value::ArrayIndex i = 0; i < adpfs.size(); ++i) {
         std::optional<bool> gpuBoost;
         std::optional<uint64_t> gpuBoostCapacityMax;
+        uint64_t gpuCapacityLoadUpHeadroom = 0;
         std::string name = adpfs[i]["Name"].asString();
         LOG(VERBOSE) << "AdpfConfig[" << i << "]'s Name: " << name;
         if (name.empty()) {
@@ -723,6 +732,22 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             return adpfs_parsed;
         }
 
+        // heuristic boost configs
+        std::optional<bool> heuristicBoostOn;
+        std::optional<uint32_t> hBoostOnMissedCycles;
+        std::optional<double> hBoostOffMaxAvgRatio;
+        std::optional<uint32_t> hBoostOffMissedCycles;
+        std::optional<double> hBoostPidPuFactor;
+        std::optional<uint32_t> hBoostUclampMin;
+        std::optional<double> jankCheckTimeFactor;
+        std::optional<uint32_t> lowFrameRateThreshold;
+        std::optional<uint32_t> maxRecordsNum;
+
+        std::optional<uint32_t> uclampMinLoadUp;
+        std::optional<uint32_t> uclampMinLoadReset;
+        std::optional<int32_t> uclampMaxEfficientBase;
+        std::optional<int32_t> uclampMaxEfficientOffset;
+
         ADPF_PARSE(pidOn, "PID_On", Bool);
         ADPF_PARSE(pidPOver, "PID_Po", Double);
         ADPF_PARSE(pidPUnder, "PID_Pu", Double);
@@ -734,6 +759,8 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(pidDUnder, "PID_Du", Double);
         ADPF_PARSE(adpfUclamp, "UclampMin_On", Bool);
         ADPF_PARSE(uclampMinInit, "UclampMin_Init", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadUp, "UclampMin_LoadUp", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadReset, "UclampMin_LoadReset", UInt);
         ADPF_PARSE(uclampMinHighLimit, "UclampMin_High", UInt);
         ADPF_PARSE(uclampMinLowLimit, "UclampMin_Low", UInt);
         ADPF_PARSE(samplingWindowP, "SamplingWindow_P", UInt64);
@@ -742,6 +769,17 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(staleTimeFactor, "StaleTimeFactor", Double);
         ADPF_PARSE(reportingRate, "ReportingRateLimitNs", UInt64);
         ADPF_PARSE(targetTimeFactor, "TargetTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(heuristicBoostOn, "HeuristicBoost_On", Bool);
+        ADPF_PARSE_OPTIONAL(hBoostOnMissedCycles, "HBoostOnMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostOffMaxAvgRatio, "HBoostOffMaxAvgRatio", Double);
+        ADPF_PARSE_OPTIONAL(hBoostOffMissedCycles, "HBoostOffMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostPidPuFactor, "HBoostPidPuFactor", Double);
+        ADPF_PARSE_OPTIONAL(hBoostUclampMin, "HBoostUclampMin", UInt);
+        ADPF_PARSE_OPTIONAL(jankCheckTimeFactor, "JankCheckTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(lowFrameRateThreshold, "LowFrameRateThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(maxRecordsNum, "MaxRecordsNum", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientBase, "UclampMax_EfficientBase", Int);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientOffset, "UclampMax_EfficientOffset", Int);
 
         if (!adpfs[i]["GpuBoost"].empty() && adpfs[i]["GpuBoost"].isBool()) {
             gpuBoost = adpfs[i]["GpuBoost"].asBool();
@@ -750,12 +788,46 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             adpfs[i]["GpuCapacityBoostMax"].isUInt64()) {
             gpuBoostCapacityMax = adpfs[i]["GpuCapacityBoostMax"].asUInt64();
         }
+        if (!adpfs[i]["GpuCapacityLoadUpHeadroom"].empty() &&
+            adpfs[i]["GpuCapacityLoadUpHeadroom"].isUInt64()) {
+            gpuCapacityLoadUpHeadroom = adpfs[i]["GpuCapacityLoadUpHeadroom"].asUInt64();
+        }
+
+        // Check all the heuristic configurations are there if heuristic boost is going to
+        // be used.
+        if (heuristicBoostOn.has_value()) {
+            if (!hBoostOnMissedCycles.has_value() || !hBoostOffMaxAvgRatio.has_value() ||
+                !hBoostOffMissedCycles.has_value() || !hBoostPidPuFactor.has_value() ||
+                !hBoostUclampMin.has_value() || !jankCheckTimeFactor.has_value() ||
+                !lowFrameRateThreshold.has_value() || !maxRecordsNum.has_value()) {
+                LOG(ERROR) << "Part of the heuristic boost configurations are missing!";
+                adpfs_parsed.clear();
+                return adpfs_parsed;
+            }
+        }
+
+        if (uclampMaxEfficientBase.has_value() != uclampMaxEfficientBase.has_value()) {
+            LOG(ERROR) << "Part of the power efficiency configuration is missing!";
+            adpfs_parsed.clear();
+            return adpfs_parsed;
+        }
+
+        if (!uclampMinLoadUp.has_value()) {
+            uclampMinLoadUp = uclampMinHighLimit;
+        }
+        if (!uclampMinLoadReset.has_value()) {
+            uclampMinLoadReset = uclampMinHighLimit;
+        }
 
         adpfs_parsed.emplace_back(std::make_shared<AdpfConfig>(
                 name, pidOn, pidPOver, pidPUnder, pidI, pidIInit, pidIHighLimit, pidILowLimit,
                 pidDOver, pidDUnder, adpfUclamp, uclampMinInit, uclampMinHighLimit,
                 uclampMinLowLimit, samplingWindowP, samplingWindowI, samplingWindowD, reportingRate,
-                targetTimeFactor, staleTimeFactor, gpuBoost, gpuBoostCapacityMax));
+                targetTimeFactor, staleTimeFactor, gpuBoost, gpuBoostCapacityMax,
+                gpuCapacityLoadUpHeadroom, heuristicBoostOn, hBoostOnMissedCycles,
+                hBoostOffMaxAvgRatio, hBoostOffMissedCycles, hBoostPidPuFactor, hBoostUclampMin,
+                jankCheckTimeFactor, lowFrameRateThreshold, maxRecordsNum, uclampMinLoadUp.value(),
+                uclampMinLoadReset.value(), uclampMaxEfficientBase, uclampMaxEfficientOffset));
     }
     LOG(INFO) << adpfs_parsed.size() << " AdpfConfigs parsed successfully";
     return adpfs_parsed;

@@ -58,7 +58,7 @@ void SessionTaskMap::addVote(int64_t sessionId, int voteId, int uclampMin, int u
                                     CpuVote(true, startTime, durationNs, uclampMin, uclampMax));
 }
 
-void SessionTaskMap::addGpuVote(int64_t sessionId, Cycles capacity,
+void SessionTaskMap::addGpuVote(int64_t sessionId, int voteId, Cycles capacity,
                                 std::chrono::steady_clock::time_point startTime,
                                 std::chrono::nanoseconds durationNs) {
     auto sessItr = mSessions.find(sessionId);
@@ -66,8 +66,7 @@ void SessionTaskMap::addGpuVote(int64_t sessionId, Cycles capacity,
         return;
     }
 
-    sessItr->second.val->votes->add(static_cast<int>(AdpfHintType::ADPF_GPU_CAPACITY),
-                                    GpuVote(true, startTime, durationNs, capacity));
+    sessItr->second.val->votes->add(voteId, GpuVote(true, startTime, durationNs, capacity));
 }
 
 std::shared_ptr<SessionValueEntry> SessionTaskMap::findSession(int64_t sessionId) const {
@@ -79,10 +78,13 @@ std::shared_ptr<SessionValueEntry> SessionTaskMap::findSession(int64_t sessionId
 }
 
 void SessionTaskMap::getTaskVoteRange(pid_t taskId, std::chrono::steady_clock::time_point timeNow,
-                                      int *uclampMin, int *uclampMax) const {
-    UclampRange uclampRange;
+                                      UclampRange &range,
+                                      std::optional<int32_t> &uclampMaxEfficientBase,
+                                      std::optional<int32_t> &uclampMaxEfficientOffset) const {
     auto taskItr = mTasks.find(taskId);
     if (taskItr == mTasks.end()) {
+        // Assign to default range
+        range = {};
         return;
     }
 
@@ -90,19 +92,22 @@ void SessionTaskMap::getTaskVoteRange(pid_t taskId, std::chrono::steady_clock::t
         if (!sessInTask->isActive) {
             continue;
         }
-        sessInTask->votes->getUclampRange(&uclampRange, timeNow);
+        sessInTask->votes->getUclampRange(range, timeNow);
+        if (sessInTask->isPowerEfficient && uclampMaxEfficientBase.has_value()) {
+            range.uclampMax = std::min(range.uclampMax,
+                                       sessInTask->votes->allTimedOut(timeNow)
+                                               ? *uclampMaxEfficientBase
+                                               : range.uclampMin + *uclampMaxEfficientOffset);
+        }
     }
-    *uclampMin = uclampRange.uclampMin;
-    *uclampMax = uclampRange.uclampMax;
 }
 
 Cycles SessionTaskMap::getSessionsGpuCapacity(
         std::chrono::steady_clock::time_point time_point) const {
     Cycles max(0);
-    for (auto const &session : mTasks) {
-        for (auto const &vote : session.second) {
-            max = std::max(max, vote->votes->getGpuCapacityRequest(time_point).value_or(Cycles(0)));
-        }
+    for (auto const &[_, session] : mSessions) {
+        max = std::max(max,
+                       session.val->votes->getGpuCapacityRequest(time_point).value_or(Cycles(0)));
     }
     return max;
 }

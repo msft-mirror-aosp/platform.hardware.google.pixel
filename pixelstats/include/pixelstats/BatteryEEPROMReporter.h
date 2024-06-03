@@ -52,18 +52,14 @@ class BatteryEEPROMReporter {
                                   const std::vector<std::string> &paths);
     void checkAndReportFGModelLoading(const std::shared_ptr<IStats> &stats_client,
                                       const std::vector<std::string> &paths);
+    void checkAndReportValidation(const std::shared_ptr<IStats> &stats_client,
+                                  const std::vector<std::string> &paths);
 
   private:
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number
     // -2.
     const int kVendorAtomOffset = 2;
-
-    enum ReportEventType {
-      EvtFGLearningParams = 0x4C48,
-      EvtGMSR             = 0xFFFF,
-      EvtModelLoading     = 0x4D4C,
-    };
 
     struct BatteryHistory {
         /* The cycle count number; record of charge/discharge times */
@@ -126,6 +122,11 @@ class BatteryEEPROMReporter {
     const int kNumBatteryHistoryFields = 19;
     /* The number of elements for relaxation event */
     const int kNumFGLearningFields = 10;
+    const int kNumFGLearningFieldsV2 = 16;
+    unsigned int last_lh_check_ = 0;
+    /* The number of elements for history validation event */
+    const int kNumValidationFields = 4;
+    unsigned int last_hv_check_ = 0;
 
     /* P21+ history format */
     struct BatteryHistoryExtend {
@@ -152,7 +153,7 @@ class BatteryEEPROMReporter {
                      const struct BatteryHistory &hist);
 
     const int kNum77759GMSRFields = 11;
-    const int kNum77779GMSRFields = 5;
+    const int kNum77779GMSRFields = 9;
     const int kNum17201HISTFields = 16;
 };
 

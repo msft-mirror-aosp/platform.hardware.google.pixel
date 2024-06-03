@@ -16,6 +16,7 @@
 
 #include <aidl/android/hardware/power/SessionTag.h>
 #include <android-base/file.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <sys/syscall.h>
 
@@ -23,7 +24,13 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+
+#include "TestHelper.h"
+#include "mocks/MockHintManager.h"
+#include "mocks/MockPowerSessionManager.h"
+#include "perfmgr/AdpfConfig.h"
 
 // define private as public to expose the private members for test.
 #define private public
@@ -31,6 +38,8 @@
 #include "aidl/PowerSessionManager.h"
 
 #define gettid() syscall(SYS_gettid)
+
+using namespace testing;
 
 using std::literals::chrono_literals::operator""ms;
 using std::literals::chrono_literals::operator""ns;
@@ -43,6 +52,9 @@ namespace hardware {
 namespace power {
 namespace impl {
 namespace pixel {
+
+using TestingPowerHintSession = PowerHintSession<NiceMock<mock::pixel::MockHintManager>,
+                                                 NiceMock<mock::pixel::MockPowerSessionManager>>;
 
 class PowerHintSessionTest : public ::testing::Test {
   public:
@@ -75,10 +87,10 @@ class PowerHintSessionTest : public ::testing::Test {
             }
         }
 
-        sess1 = ndk::SharedRefBase::make<PowerHintSession>(1, 1, session1Threads, 1000000,
-                                                           SessionTag::OTHER);
-        sess2 = ndk::SharedRefBase::make<PowerHintSession>(2, 2, session2Threads, 1000000,
-                                                           SessionTag::OTHER);
+        sess1 = ndk::SharedRefBase::make<PowerHintSession<>>(1, 1, session1Threads, 1000000,
+                                                             SessionTag::OTHER);
+        sess2 = ndk::SharedRefBase::make<PowerHintSession<>>(2, 2, session2Threads, 1000000,
+                                                             SessionTag::OTHER);
     }
 
     void TearDown() {
@@ -103,8 +115,8 @@ class PowerHintSessionTest : public ::testing::Test {
     std::mutex m;
     std::vector<int32_t> session1Threads;
     std::vector<int32_t> session2Threads;
-    std::shared_ptr<PowerHintSession> sess1;
-    std::shared_ptr<PowerHintSession> sess2;
+    std::shared_ptr<PowerHintSession<>> sess1;
+    std::shared_ptr<PowerHintSession<>> sess2;
 
     // close the i-th thread in thread list.
     void closeThread(int i) {
@@ -161,6 +173,37 @@ class PowerHintSessionTest : public ::testing::Test {
         // success status.
         return true;
     }
+};
+
+class PowerHintSessionMockedTest : public Test {
+  public:
+    void SetUp() {
+        mTestConfig = std::make_shared<::android::perfmgr::AdpfConfig>(makeMockConfig());
+        mMockHintManager = NiceMock<mock::pixel::MockHintManager>::GetInstance();
+        ON_CALL(*mMockHintManager, GetAdpfProfile()).WillByDefault(Return(mTestConfig));
+
+        mMockPowerSessionManager = NiceMock<mock::pixel::MockPowerSessionManager>::getInstance();
+        mHintSession = ndk::SharedRefBase::make<TestingPowerHintSession>(mTgid, mUid, mTids, 1,
+                                                                         SessionTag::OTHER);
+    }
+
+    void TearDown() {
+        Mock::VerifyAndClear(mMockHintManager);
+        Mock::VerifyAndClear(mMockPowerSessionManager);
+        if (mHintSession) {
+            mHintSession->close();
+        }
+    }
+
+  protected:
+    std::shared_ptr<::android::perfmgr::AdpfConfig> mTestConfig;
+    std::shared_ptr<TestingPowerHintSession> mHintSession;
+    NiceMock<mock::pixel::MockHintManager> *mMockHintManager;
+    NiceMock<mock::pixel::MockPowerSessionManager> *mMockPowerSessionManager;
+
+    int mTgid = 10000;
+    int mUid = 1001;
+    std::vector<int> mTids = {10000};
 };
 
 TEST_F(PowerHintSessionTest, removeDeadThread) {
