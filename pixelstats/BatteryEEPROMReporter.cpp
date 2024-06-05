@@ -24,6 +24,7 @@
 
 #include <android-base/file.h>
 #include <pixelstats/BatteryEEPROMReporter.h>
+#include <pixelstats/StatsHelper.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 
 namespace android {
@@ -38,6 +39,7 @@ using android::hardware::google::pixel::PixelAtoms::BatteryEEPROM;
 
 #define LINESIZE 71
 #define LINESIZE_V2 31
+#define LINESIZE_MAX17201_HIST 80
 
 BatteryEEPROMReporter::BatteryEEPROMReporter() {}
 
@@ -58,7 +60,6 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
         return;
     }
-    ALOGD("checkAndReport: %s", file_contents.c_str());
 
     int16_t i, num;
     struct BatteryHistory hist;
@@ -204,8 +205,8 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     ALOGD("reportEvent: cycle_cnt:%d, full_cap:%d, esr:%d, rslow:%d, soh:%d, "
           "batt_temp:%d, cutoff_soc:%d, cc_soc:%d, sys_soc:%d, msoc:%d, "
           "batt_soc:%d, reserve:%d, max_temp:%d, min_temp:%d, max_vbatt:%d, "
-          "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%d, full_rep:%d, "
-          "tempco:0x%x, rcomp0:0x%x, timer_h:%d",
+          "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%#x, full_rep:%d, "
+          "tempco:%#x, rcomp0:%#x, timer_h:%d",
           hist.cycle_cnt, hist.full_cap, hist.esr, hist.rslow, hist.soh, hist.batt_temp,
           hist.cutoff_soc, hist.cc_soc, hist.sys_soc, hist.msoc, hist.batt_soc, hist.reserve,
           hist.max_temp, hist.min_temp, hist.max_vbatt, hist.min_vbatt, hist.max_ibatt,
@@ -267,6 +268,266 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk())
         ALOGE("Unable to report BatteryEEPROM to Stats service");
+}
+
+void BatteryEEPROMReporter::checkAndReportGMSR(const std::shared_ptr<IStats> &stats_client,
+                                               const std::vector<std::string> &paths) {
+    struct BatteryHistory gmsr = {.checksum = EvtGMSR};
+    std::string file_contents;
+    std::string path;
+    int16_t num;
+
+    if (paths.empty())
+        return;
+
+    for (int i = 0; i < paths.size(); i++) {
+        if (fileExists(paths[i])) {
+            path = paths[i];
+            break;
+        }
+    }
+
+    if (!ReadFileToString(path, &file_contents)) {
+        ALOGE("Unable to read gmsr path: %s - %s", path.c_str(), strerror(errno));
+        return;
+    }
+
+    num = sscanf(file_contents.c_str(),  "rcomp0\t:%4" SCNx16 "\ntempco\t:%4" SCNx16
+                 "\nfullcaprep\t:%4" SCNx16 "\ncycles\t:%4" SCNx16 "\nfullcapnom\t:%4" SCNx16
+                 "\nqresidual00\t:%4" SCNx16 "\nqresidual10\t:%4" SCNx16
+                 "\nqresidual20\t:%4" SCNx16 "\nqresidual30\t:%4" SCNx16
+                 "\ncv_mixcap\t:%4" SCNx16 "\nhalftime\t:%4" SCNx16,
+                 &gmsr.rcomp0, &gmsr.tempco, &gmsr.full_rep, &gmsr.cycle_cnt, &gmsr.full_cap,
+                 &gmsr.max_vbatt, &gmsr.min_vbatt, &gmsr.max_ibatt, &gmsr.min_ibatt,
+                 &gmsr.esr, &gmsr.rslow);
+    if (num != kNum77759GMSRFields && num != kNum77779GMSRFields) {
+        ALOGE("Couldn't process GMSR. num=%d\n", num);
+        return;
+    }
+
+    if (gmsr.tempco == 0xFFFF || gmsr.rcomp0 == 0xFFFF || gmsr.full_cap == 0xFFFF) {
+	    ALOGD("Ignore invalid gmsr");
+	    return;
+    }
+
+    reportEvent(stats_client, gmsr);
+}
+
+void BatteryEEPROMReporter::checkAndReportMaxfgHistory(const std::shared_ptr<IStats> &stats_client,
+                                                       const std::string &path) {
+    std::string file_contents;
+    int16_t i;
+
+    if (path.empty())
+        return;
+
+    if (!ReadFileToString(path, &file_contents)) {
+        ALOGD("Unable to read maxfg_hist path: %s - %s", path.c_str(), strerror(errno));
+        return;
+    }
+
+    std::string hist_each;
+    const int kHistTotalLen = file_contents.size();
+
+    ALOGD("checkAndReportMaxfgHistory:size=%d\n%s", kHistTotalLen, file_contents.c_str());
+
+    for (i = 0; i < kHistTotalLen; i++) {
+        struct BatteryHistory maxfg_hist;
+        uint16_t nQRTable00, nQRTable10, nQRTable20, nQRTable30, nCycles, nFullCapNom;
+        uint16_t nRComp0, nTempCo, nIAvgEmpty, nFullCapRep, nVoltTemp, nMaxMinCurr, nMaxMinVolt;
+        uint16_t nMaxMinTemp, nSOC, nTimerH;
+        int16_t num;
+        size_t hist_offset = i * LINESIZE_MAX17201_HIST;
+
+        if (hist_offset >= file_contents.size())
+            break;
+
+        hist_each = file_contents.substr(hist_offset, LINESIZE_MAX17201_HIST);
+        num = sscanf(hist_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16
+                     "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16
+                     "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16,
+                     &nQRTable00, &nQRTable10, &nQRTable20, &nQRTable30, &nCycles, &nFullCapNom,
+                     &nRComp0, &nTempCo, &nIAvgEmpty, &nFullCapRep, &nVoltTemp, &nMaxMinCurr,
+                     &nMaxMinVolt, &nMaxMinTemp, &nSOC, &nTimerH);
+
+        if (num != kNum17201HISTFields) {
+            ALOGE("Couldn't process %s (num=%d)", hist_each.c_str(), num);
+            continue;
+        }
+
+        /* not assign: nQRTable00, nQRTable10, nQRTable20, nQRTable30 */
+        maxfg_hist.reserve = 0xFF;
+        maxfg_hist.tempco = nTempCo;
+        maxfg_hist.rcomp0 = nRComp0;
+        maxfg_hist.full_rep = nFullCapNom;
+        maxfg_hist.full_cap = nFullCapRep;
+        maxfg_hist.cycle_cnt = nCycles * 16 / 100; // LSB: 16%;
+        maxfg_hist.timer_h = (nTimerH * 32 / 10) / 24; // LSB: 3.2 hours
+        maxfg_hist.batt_soc = (nSOC >> 8) & 0x00FF;
+        maxfg_hist.msoc = nSOC & 0x00FF;
+        maxfg_hist.max_ibatt = ((nMaxMinCurr >> 8) & 0x00FF) * 80;
+        maxfg_hist.min_ibatt = (nMaxMinCurr & 0x00FF) * 80 * (-1);
+        maxfg_hist.max_vbatt = ((nMaxMinVolt >> 8) & 0x00FF) * 20;
+        maxfg_hist.min_vbatt = (nMaxMinVolt & 0x00FF) * 20;
+        maxfg_hist.max_temp = (nMaxMinTemp >> 8) & 0x00FF;
+        maxfg_hist.min_temp = nMaxMinTemp & 0x00FF;
+        maxfg_hist.esr = nIAvgEmpty;
+        maxfg_hist.rslow = nVoltTemp;
+
+        reportEvent(stats_client, maxfg_hist);
+    }
+}
+
+void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<IStats> &client,
+                                                         const std::vector<std::string> &paths) {
+    struct BatteryHistory params = {.full_cap = 0, .esr = 0, .rslow = 0,
+                                    .checksum = EvtModelLoading, };
+    std::string file_contents;
+    std::string path;
+    int num, pos = 0;
+    const char *data;
+
+    if (paths.empty())
+        return;
+
+    for (int i = 0; i < paths.size(); i++) {
+        if (fileExists(paths[i])) {
+            path = paths[i];
+            break;
+        }
+    }
+
+    /* not found */
+    if (path.empty())
+        return;
+
+    if (!ReadFileToString(path, &file_contents)) {
+        ALOGE("Unable to read ModelLoading History path: %s - %s", path.c_str(), strerror(errno));
+        return;
+    }
+
+    data = file_contents.c_str();
+
+    num = sscanf(&data[pos],  "ModelNextUpdate: %" SCNu16 "\n"
+                 "%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%n",
+                 &params.rslow, &pos);
+    if (num != 1) {
+        ALOGE("Couldn't process ModelLoading History. num=%d\n", num);
+        return;
+    }
+
+    sscanf(&data[pos],  "ATT: %" SCNu16 " FAIL: %" SCNu16, &params.full_cap, &params.esr);
+
+    /* don't need to report when attempts counter is zero */
+    if (params.full_cap == 0)
+        return;
+
+    reportEvent(client, params);
+}
+
+void BatteryEEPROMReporter::checkAndReportFGLearning(const std::shared_ptr<IStats> &stats_client,
+                                                     const std::vector<std::string> &paths) {
+    struct BatteryHistory params = {.checksum = EvtFGLearningHistory};
+    struct timespec boot_time;
+    auto format = FormatIgnoreAddr;
+    int fg_idx = 0;
+
+    if (paths.empty())
+        return;
+
+    clock_gettime(CLOCK_MONOTONIC, &boot_time);
+    for (int path_idx = 0; path_idx < paths.size(); path_idx++) {
+        std::vector<std::vector<uint16_t>> events;
+        std::string path = paths[path_idx];
+
+        if (!path.empty() && fileExists(path)) {
+            readLogbuffer(path, kNumFGLearningFieldsV2, params.checksum, format, last_lh_check_,
+                          events);
+            if (events.size() == 0)
+                readLogbuffer(path, kNumFGLearningFieldsV2, "learn", format, last_lh_check_,
+                              events);
+            if (events.size() == 0)
+                readLogbuffer(path, kNumFGLearningFields, "learn", format, last_lh_check_, events);
+
+            for (int event_idx = 0; event_idx < events.size(); event_idx++) {
+                std::vector<uint16_t> &event = events[event_idx];
+
+                if (event.size() == kNumFGLearningFieldsV2) {
+                    params.full_cap = event[0];                /* fcnom */
+                    params.esr = event[1];                     /* dpacc */
+                    params.rslow = event[2];                   /* dqacc */
+                    params.full_rep = event[3];                /* fcrep */
+                    params.msoc = (uint8_t)(event[4] >> 8);    /* repsoc */
+                    params.sys_soc = (uint8_t)(event[5] >> 8); /* mixsoc */
+                    params.batt_soc = (uint8_t)(event[6] >> 8);/* vfsoc */
+                    params.min_ibatt = event[7];               /* fstats */
+                    params.max_temp = (int8_t)(event[8] >> 8); /* avgtemp */
+                    params.min_temp = (int8_t)(event[9] >> 8); /* temp */
+                    params.max_ibatt = event[10];              /* qh */
+                    params.max_vbatt = event[11];              /* vcell */
+                    params.min_vbatt = event[12];              /* avgvcell */
+                    params.cycle_cnt = event[13];              /* vfocf */
+                    params.rcomp0 = event[14];                 /* rcomp0 */
+                    params.tempco = event[15];                 /* tempco */
+                    params.reserve = fg_idx  ;                 /* battery index */
+                } else if (event.size() == kNumFGLearningFields) {
+                    params.full_cap = event[0];     /* fcnom */
+                    params.esr = event[1];          /* dpacc */
+                    params.rslow = event[2];        /* dqacc */
+                    params.max_vbatt = event[3];    /* fcrep */
+                    params.full_rep = event[4];     /* repsoc */
+                    params.min_vbatt = event[5];    /* mixsoc */
+                    params.max_ibatt = event[6];    /* vfsoc */
+                    params.min_ibatt = event[7];    /* fstats */
+                    params.rcomp0 = event[8];       /* rcomp0 */
+                    params.tempco = event[9];       /* tempco */
+                    params.reserve = fg_idx;        /* battery index */
+                } else {
+                    ALOGE("Not support %zu fields for FG learning event", event.size());
+                    continue;
+                }
+                reportEvent(stats_client, params);
+            }
+            fg_idx++;
+        }
+    }
+    last_lh_check_ = (unsigned int)boot_time.tv_sec;
+}
+
+void BatteryEEPROMReporter::checkAndReportValidation(const std::shared_ptr<IStats> &stats_client,
+                                                     const std::vector<std::string> &paths) {
+    struct BatteryHistory params = {.checksum = EvtHistoryValidation};
+    struct timespec boot_time;
+    auto format = FormatIgnoreAddr;
+    int fg_idx = 0;
+
+    if (paths.empty())
+        return;
+
+    clock_gettime(CLOCK_MONOTONIC, &boot_time);
+    for (int i = 0; i < paths.size(); i++) {
+        std::vector<std::vector<uint16_t>> events;
+        std::string path = paths[i];
+
+        if (!path.empty() && fileExists(path)) {
+            readLogbuffer(path, kNumValidationFields, params.checksum, format, last_hv_check_, events);
+            for (int seq = 0; seq < events.size(); seq++) {
+                std::vector<uint16_t> &event = events[seq];
+                if (event.size() == kNumValidationFields) {
+                    params.full_cap = event[0]; /* fcnom */
+                    params.esr = event[1];      /* dpacc */
+                    params.rslow = event[2];    /* dqacc */
+                    params.full_rep = event[3]; /* fcrep */
+                    params.reserve = fg_idx;
+                    reportEvent(stats_client, params);
+                } else {
+                    ALOGE("Not support %zu fields for History Validation event", event.size());
+                }
+            }
+            fg_idx++;
+        }
+    }
+    last_hv_check_ = (unsigned int)boot_time.tv_sec;
 }
 
 }  // namespace pixel

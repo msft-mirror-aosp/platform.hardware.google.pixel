@@ -22,6 +22,7 @@
 #include <memory>
 #include <thread>
 
+#include "AdpfTypes.h"
 #include "disp-power/DisplayLowPower.h"
 #include "disp-power/InteractionHandler.h"
 
@@ -31,10 +32,6 @@ namespace hardware {
 namespace power {
 namespace impl {
 namespace pixel {
-
-using ::aidl::android::hardware::power::Boost;
-using ::aidl::android::hardware::power::IPowerHintSession;
-using ::aidl::android::hardware::power::Mode;
 
 class Power : public ::aidl::android::hardware::power::BnPower {
   public:
@@ -47,7 +44,14 @@ class Power : public ::aidl::android::hardware::power::BnPower {
                                          const std::vector<int32_t> &threadIds,
                                          int64_t durationNanos,
                                          std::shared_ptr<IPowerHintSession> *_aidl_return) override;
+    ndk::ScopedAStatus createHintSessionWithConfig(
+            int32_t tgid, int32_t uid, const std::vector<int32_t> &threadIds, int64_t durationNanos,
+            SessionTag tag, SessionConfig *config,
+            std::shared_ptr<IPowerHintSession> *_aidl_return) override;
     ndk::ScopedAStatus getHintSessionPreferredRate(int64_t *outNanoseconds) override;
+    ndk::ScopedAStatus getSessionChannel(int32_t tgid, int32_t uid,
+                                         ChannelConfig *_aidl_return) override;
+    ndk::ScopedAStatus closeSessionChannel(int32_t tgid, int32_t uid) override;
     binder_status_t dump(int fd, const char **args, uint32_t numArgs) override;
 
   private:
@@ -55,6 +59,7 @@ class Power : public ::aidl::android::hardware::power::BnPower {
     std::unique_ptr<InteractionHandler> mInteractionHandler;
     std::atomic<bool> mVRModeOn;
     std::atomic<bool> mSustainedPerfModeOn;
+    int32_t mServiceVersion;
 };
 
 }  // namespace pixel

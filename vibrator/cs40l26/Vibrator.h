@@ -100,12 +100,20 @@ class Vibrator : public BnVibrator {
         // Set haptics PCM amplifier before triggering audio haptics feature
         virtual bool setHapticPcmAmp(struct pcm **haptic_pcm, bool enable, int card,
                                      int device) = 0;
+        // Checks to see if the passthrough i2s haptics feature is supported by
+        // the target device.
+        virtual bool isPassthroughI2sHapticSupported() = 0;
         // Set OWT waveform for compose or compose PWLE request
         virtual bool uploadOwtEffect(const uint8_t *owtData, const uint32_t numBytes,
                                      struct ff_effect *effect, uint32_t *outEffectIndex,
                                      int *status) = 0;
         // Erase OWT waveform
         virtual bool eraseOwtEffect(int8_t effectIndex, std::vector<ff_effect> *effect) = 0;
+        // Checks to see if DBC (Dynamic Boost Control) feature is supported
+        // by the target device.
+        virtual bool isDbcSupported() = 0;
+        // Configures and enables the DBC feature and all associated parameters
+        virtual bool enableDbc() = 0;
         // Emit diagnostic information to the given file.
         virtual void debug(int fd) = 0;
     };
@@ -208,7 +216,6 @@ class Vibrator : public BnVibrator {
                           const std::shared_ptr<IVibratorCallback> &callback);
     // set 'amplitude' based on an arbitrary scale determined by 'maximum'
     ndk::ScopedAStatus setEffectAmplitude(float amplitude, float maximum, bool scalable);
-    ndk::ScopedAStatus setGlobalAmplitude(bool set);
     // 'simple' effects are those precompiled and loaded into the controller
     ndk::ScopedAStatus getSimpleDetails(Effect effect, EffectStrength strength,
                                         uint32_t *outEffectIndex, uint32_t *outTimeMs,
@@ -251,8 +258,9 @@ class Vibrator : public BnVibrator {
     int mCard;
     int mDevice;
     bool mHasHapticAlsaDevice{false};
+    bool mHasPassthroughHapticDevice;
     bool mIsUnderExternalControl;
-    float mLongEffectScale = 1.0;
+    float mGlobalAmplitude = 1.0;
     bool mIsChirpEnabled;
     uint32_t mSupportedPrimitivesBits = 0x0;
     float mRedc{0};
@@ -266,9 +274,19 @@ class Vibrator : public BnVibrator {
     uint32_t mScalingFactor;
     uint32_t mScaleCooldown;
     bool mContextEnable;
+    bool mContextEnabledPreviously{false};
     uint32_t mLastEffectPlayedTime = 0;
     float mLastPlayedScale = 0;
     sp<CapoDetector> mContextListener;
+    enum hal_state {
+        IDLE,
+        PREPARING,
+        ISSUED,
+        PLAYING,
+        STOPPED,
+        RESTORED,
+    };
+    hal_state halState = IDLE;
 };
 
 }  // namespace vibrator

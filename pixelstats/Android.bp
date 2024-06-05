@@ -30,6 +30,7 @@ cc_library {
     },
     srcs: [
         "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
         ":libstats_atom_options_protos",
         ":libprotobuf-internal-descriptor-proto",
     ],
@@ -47,6 +48,7 @@ java_library {
     },
     srcs: [
         "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
         ":libstats_atom_options_protos",
         ":libprotobuf-internal-descriptor-proto",
     ],
@@ -64,6 +66,7 @@ java_library_host {
     },
     srcs: [
         "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
         ":libstats_atom_options_protos",
     ],
 }
@@ -71,7 +74,13 @@ java_library_host {
 genrule {
     name: "pixelatoms_defs.h",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --header $(genDir)/pixelatoms_defs.h --namespace hardware,google,pixel,PixelAtoms --vendor-proto hardware/google/pixel/pixelstats/pixelatoms.proto",
+    cmd: "$(location stats-log-api-gen) --header $(genDir)/pixelatoms_defs.h --namespace hardware,google,pixel,PixelAtoms --vendor-proto $(location pixelatoms.proto)",
+    srcs: [
+        "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
+        ":libstats_atom_options_protos",
+        ":libprotobuf-internal-protos",
+    ],
     out: [
         "pixelatoms_defs.h",
     ],
@@ -84,53 +93,112 @@ cc_library {
     export_generated_headers: ["pixelatoms_defs.h"],
 }
 
-cc_library {
-  name: "libpixelstats",
-  vendor: true,
-  export_include_dirs: ["include"],
+genrule {
+    name: "pixelstatsatoms.h",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --header $(out)" +
+        " --module pixelstats" +
+        " --namespace android,hardware,google,pixel,PixelAtoms" +
+        " --vendor-proto $(location pixelatoms.proto)",
+    out: [
+        "pixelstatsatoms.h",
+    ],
+    srcs: [
+        "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
+        ":libstats_atom_options_protos",
+        ":libprotobuf-internal-protos",
+    ],
+}
 
-  tidy_disabled_srcs: [
-    "MmMetricsReporter.cpp", // b/215238264
-  ],
-  srcs: [
-    "BatteryCapacityReporter.cpp",
-    "BatteryEEPROMReporter.cpp",
-    "BatteryHealthReporter.cpp",
-    "BrownoutDetectedReporter.cpp",
-    "ChargeStatsReporter.cpp",
-    "DropDetect.cpp",
-    "MmMetricsReporter.cpp",
-    "MitigationStatsReporter.cpp",
-    "PcaChargeStats.cpp",
-    "StatsHelper.cpp",
-    "SysfsCollector.cpp",
-    "ThermalStatsReporter.cpp",
-    "TempResidencyReporter.cpp",
-    "UeventListener.cpp",
-    "WirelessChargeStats.cpp",
-  ],
-  cflags: [
-    "-Wall",
-    "-Werror",
-  ],
-  shared_libs: [
-    "android.frameworks.stats-V1-ndk",
-    "libbase",
-    "libbinder_ndk",
-    "libcutils",
-    "libhidlbase",
-    "liblog",
-    "libprotobuf-cpp-lite",
-    "libutils",
-    "libsensorndkbridge",
-    "pixelatoms-cpp",
-  ],
-  export_shared_lib_headers: [
-    "android.frameworks.stats-V1-ndk",
-    "pixelatoms-cpp",
-  ],
-  static_libs: [
-    "chre_client",
-  ],
-  header_libs: ["chre_api"],
+genrule {
+    name: "pixelstatsatoms.cpp",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --cpp $(out)" +
+        " --module pixelstats" +
+        " --importHeader pixelstatsatoms.h" +
+        " --namespace android,hardware,google,pixel,PixelAtoms" +
+        " --vendor-proto $(location pixelatoms.proto)",
+    out: [
+        "pixelstatsatoms.cpp",
+    ],
+    srcs: [
+        "pixelatoms.proto",
+        ":libstats_shared_enum_protos",
+        ":libstats_atom_options_protos",
+        ":libprotobuf-internal-protos",
+    ],
+}
+
+cc_library_static {
+    name: "libpixelstatsatoms",
+    vendor: true,
+    generated_sources: ["pixelstatsatoms.cpp"],
+    generated_headers: ["pixelstatsatoms.h"],
+    export_generated_headers: ["pixelstatsatoms.h"],
+    shared_libs: [
+        "android.frameworks.stats-V2-ndk",
+    ],
+}
+
+cc_library {
+    name: "libpixelstats",
+    vendor: true,
+    export_include_dirs: ["include"],
+
+    tidy_disabled_srcs: [
+        "MmMetricsReporter.cpp", // b/215238264
+    ],
+    srcs: [
+        "BatteryCapacityReporter.cpp",
+        "BatteryEEPROMReporter.cpp",
+        "BatteryHealthReporter.cpp",
+        "BatteryFGReporter.cpp",
+        "BrownoutDetectedReporter.cpp",
+        "ChargeStatsReporter.cpp",
+        "DisplayStatsReporter.cpp",
+        "DropDetect.cpp",
+        "MmMetricsReporter.cpp",
+        "MitigationStatsReporter.cpp",
+        "MitigationDurationReporter.cpp",
+        "PcaChargeStats.cpp",
+        "StatsHelper.cpp",
+        "SysfsCollector.cpp",
+        "ThermalStatsReporter.cpp",
+        "TempResidencyReporter.cpp",
+        "UeventListener.cpp",
+        "WirelessChargeStats.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
+    shared_libs: [
+        "android.frameworks.stats-V2-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libhidlbase",
+        "liblog",
+        "libprotobuf-cpp-lite",
+        "libutils",
+        "libsensorndkbridge",
+        "pixelatoms-cpp",
+    ],
+    export_shared_lib_headers: [
+        "android.frameworks.stats-V2-ndk",
+        "pixelatoms-cpp",
+    ],
+    static_libs: [
+        "chre_client",
+        "libpixelstatsatoms",
+    ],
+    header_libs: ["chre_api"],
+}
+
+filegroup {
+    name: "pixelatoms_proto",
+    srcs: [
+        "pixelatoms.proto",
+    ],
 }

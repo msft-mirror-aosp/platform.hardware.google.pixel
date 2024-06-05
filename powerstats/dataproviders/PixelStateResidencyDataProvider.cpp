@@ -107,9 +107,16 @@ std::unordered_map<std::string, std::vector<State>> PixelStateResidencyDataProvi
     return ret;
 }
 
-::ndk::ScopedAStatus PixelStateResidencyDataProvider::registerCallback(
+void PixelStateResidencyDataProvider::registerStatesUpdateCallback(
+        std::function<void(const std::string &, const std::vector<State> &in_states)>
+                statesUpdateCallback) {
+    mStatesUpdateCallback = statesUpdateCallback;
+}
+
+::ndk::ScopedAStatus PixelStateResidencyDataProvider::registerCallbackByStates(
         const std::string &in_entityName,
-        const std::shared_ptr<IPixelStateResidencyCallback> &in_cb) {
+        const std::shared_ptr<IPixelStateResidencyCallback> &in_cb,
+        const std::vector<State> &in_states) {
     std::lock_guard<std::mutex> lock(mLock);
 
     if (!in_cb) {
@@ -127,8 +134,19 @@ std::unordered_map<std::string, std::vector<State>> PixelStateResidencyDataProvi
 
     toRegister->mCallback = in_cb;
 
+    if (!in_states.empty()) {
+        toRegister->mStates = in_states;
+        mStatesUpdateCallback(in_entityName, in_states);
+    }
+
     LOG(INFO) << __func__ << ": Registered " << in_entityName;
     return ::ndk::ScopedAStatus::ok();
+}
+
+::ndk::ScopedAStatus PixelStateResidencyDataProvider::registerCallback(
+        const std::string &in_entityName,
+        const std::shared_ptr<IPixelStateResidencyCallback> &in_cb) {
+    return registerCallbackByStates(in_entityName, in_cb, {});
 }
 
 ::ndk::ScopedAStatus PixelStateResidencyDataProvider::unregisterCallback(
@@ -140,6 +158,9 @@ std::unordered_map<std::string, std::vector<State>> PixelStateResidencyDataProvi
     }
 
     auto toRemove = std::find_if(mEntries.begin(), mEntries.end(), [&in_cb](const auto &it) {
+        if (!it.mCallback) {
+            return false;
+        }
         return it.mCallback->asBinder().get() == in_cb->asBinder().get();
     });
 

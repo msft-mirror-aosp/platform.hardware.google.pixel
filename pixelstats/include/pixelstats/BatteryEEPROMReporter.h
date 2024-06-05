@@ -45,6 +45,15 @@ class BatteryEEPROMReporter {
   public:
     BatteryEEPROMReporter();
     void checkAndReport(const std::shared_ptr<IStats> &stats_client, const std::string &path);
+    void checkAndReportGMSR(const std::shared_ptr<IStats> &stats_client, const std::vector<std::string> &paths);
+    void checkAndReportMaxfgHistory(const std::shared_ptr<IStats> &stats_client,
+                                    const std::string &path);
+    void checkAndReportFGLearning(const std::shared_ptr<IStats> &stats_client,
+                                  const std::vector<std::string> &paths);
+    void checkAndReportFGModelLoading(const std::shared_ptr<IStats> &stats_client,
+                                      const std::vector<std::string> &paths);
+    void checkAndReportValidation(const std::shared_ptr<IStats> &stats_client,
+                                  const std::vector<std::string> &paths);
 
   private:
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
@@ -111,8 +120,15 @@ class BatteryEEPROMReporter {
     };
     /* The number of elements in struct BatteryHistory for P20 series */
     const int kNumBatteryHistoryFields = 19;
+    /* The number of elements for relaxation event */
+    const int kNumFGLearningFields = 10;
+    const int kNumFGLearningFieldsV2 = 16;
+    unsigned int last_lh_check_ = 0;
+    /* The number of elements for history validation event */
+    const int kNumValidationFields = 4;
+    unsigned int last_hv_check_ = 0;
 
-    /* P21 history format */
+    /* P21+ history format */
     struct BatteryHistoryExtend {
         uint16_t tempco;
         uint16_t rcomp0;
@@ -135,6 +151,10 @@ class BatteryEEPROMReporter {
     bool checkLogEvent(struct BatteryHistory hist);
     void reportEvent(const std::shared_ptr<IStats> &stats_client,
                      const struct BatteryHistory &hist);
+
+    const int kNum77759GMSRFields = 11;
+    const int kNum77779GMSRFields = 9;
+    const int kNum17201HISTFields = 16;
 };
 
 }  // namespace pixel

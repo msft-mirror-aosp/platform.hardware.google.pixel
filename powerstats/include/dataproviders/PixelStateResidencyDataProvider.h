@@ -54,6 +54,13 @@ class PixelStateResidencyDataProvider : public PowerStats::IStateResidencyDataPr
             return mEnclosed->registerCallback(in_entityName, in_cb);
         }
 
+        ::ndk::ScopedAStatus registerCallbackByStates(
+                const std::string &in_entityName,
+                const std::shared_ptr<IPixelStateResidencyCallback> &in_cb,
+                const std::vector<State> &in_states) override {
+            return mEnclosed->registerCallbackByStates(in_entityName, in_cb, in_states);
+        }
+
         ::ndk::ScopedAStatus unregisterCallback(
                 const std::shared_ptr<IPixelStateResidencyCallback> &in_cb) override {
             return mEnclosed->unregisterCallback(in_cb);
@@ -71,9 +78,18 @@ class PixelStateResidencyDataProvider : public PowerStats::IStateResidencyDataPr
         std::shared_ptr<IPixelStateResidencyCallback> mCallback;
     };
 
+    void registerStatesUpdateCallback(
+            std::function<void(const std::string &, const std::vector<State> &)>
+                    statesUpdateCallback) override;
+
     ::ndk::ScopedAStatus registerCallback(
             const std::string &in_entityName,
             const std::shared_ptr<IPixelStateResidencyCallback> &in_cb);
+
+    ::ndk::ScopedAStatus registerCallbackByStates(
+            const std::string &in_entityName,
+            const std::shared_ptr<IPixelStateResidencyCallback> &in_cb,
+            const std::vector<State> &in_states);
 
     ::ndk::ScopedAStatus unregisterCallback(
             const std::shared_ptr<IPixelStateResidencyCallback> &in_cb);
@@ -85,6 +101,7 @@ class PixelStateResidencyDataProvider : public PowerStats::IStateResidencyDataPr
     std::mutex mLock;
     std::shared_ptr<ProviderService> mProviderService;
     std::vector<Entry> mEntries;
+    std::function<void(const std::string &, const std::vector<State> &)> mStatesUpdateCallback;
 };
 
 }  // namespace stats

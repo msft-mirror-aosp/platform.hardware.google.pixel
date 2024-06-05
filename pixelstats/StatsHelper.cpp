@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include <android/binder_manager.h>
+#include <android-base/file.h>
 #include <pixelstats/StatsHelper.h>
 
 #define LOG_TAG "pixelstats-vendor"
@@ -28,11 +30,18 @@ namespace pixel {
 
 using aidl::android::frameworks::stats::VendorAtom;
 using aidl::android::frameworks::stats::VendorAtomValue;
+using android::base::ReadFileToString;
 
 // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
 // store everything in the values array at the index of the field number
 // -2.
 const int kVendorAtomOffset = 2;
+
+bool fileExists(const std::string &path) {
+    struct stat sb;
+
+    return stat(path.c_str(), &sb) == 0;
+}
 
 std::shared_ptr<IStats> getStatsService() {
     const std::string instance = std::string() + IStats::descriptor + "/default";
@@ -176,27 +185,6 @@ void reportSpeechDspStat(const std::shared_ptr<IStats> &stats_client,
         ALOGE("Unable to report VendorSpeechDspStat to Stats service");
 }
 
-void reportPhysicalDropDetected(const std::shared_ptr<IStats> &stats_client,
-                                const PixelAtoms::VendorPhysicalDropDetected &dropDetected) {
-    // Load values array
-    std::vector<VendorAtomValue> values(3);
-    VendorAtomValue tmp;
-    tmp.set<VendorAtomValue::intValue>(dropDetected.confidence_pctg());
-    values[0] = tmp;
-    tmp.set<VendorAtomValue::intValue>(dropDetected.accel_peak_thousandths_g());
-    values[1] = tmp;
-    tmp.set<VendorAtomValue::intValue>(dropDetected.freefall_time_millis());
-    values[2] = tmp;
-
-    // Send vendor atom to IStats HAL
-    VendorAtom event = {.reverseDomainName = "",
-                        .atomId = PixelAtoms::Atom::kVendorPhysicalDropDetected,
-                        .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report VendorPhysicalDropDetected to Stats service");
-}
-
 void reportUsbPortOverheat(const std::shared_ptr<IStats> &stats_client,
                            const PixelAtoms::VendorUsbPortOverheat &overheat_info) {
     // Load values array
@@ -220,6 +208,100 @@ void reportUsbPortOverheat(const std::shared_ptr<IStats> &stats_client,
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk())
         ALOGE("Unable to report VendorUsbPortOverheat to Stats service");
+}
+
+void reportUsbDataSessionEvent(const std::shared_ptr<IStats> &stats_client,
+                               const PixelAtoms::VendorUsbDataSessionEvent &usb_data_event) {
+    // Load values array
+    std::vector<VendorAtomValue> values(4);
+    VendorAtomValue tmp;
+    tmp.set<VendorAtomValue::intValue>(usb_data_event.usb_role());
+    values[0] = tmp;
+    tmp.set<VendorAtomValue::repeatedIntValue>(std::vector<int32_t>(
+            usb_data_event.usb_states().begin(), usb_data_event.usb_states().end()));
+    values[1] = tmp;
+    tmp.set<VendorAtomValue::repeatedLongValue>(std::vector<int64_t>(
+            usb_data_event.elapsed_time_ms().begin(), usb_data_event.elapsed_time_ms().end()));
+    values[2] = tmp;
+    tmp.set<VendorAtomValue::longValue>(usb_data_event.duration_ms());
+    values[3] = tmp;
+
+    // Send vendor atom to IStats HAL
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kVendorUsbDataSessionEvent,
+                        .values = std::move(values)};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk())
+        ALOGE("Unable to report VendorUsbDataSessionEvent to Stats service");
+}
+
+void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
+                   enum ReportEventFormat format, unsigned int last_check_time,
+                   std::vector<std::vector<uint16_t>> &events) {
+    char hex_str[16];
+
+    snprintf(hex_str, sizeof(hex_str), "0x%X", code);
+
+    return readLogbuffer(buf_path, num_fields, hex_str, format, last_check_time, events);
+}
+
+void readLogbuffer(const std::string &buf_path, int num_fields, const char *code,
+                   enum ReportEventFormat format, unsigned int last_check_time,
+                   std::vector<std::vector<uint16_t>> &events) {
+    std::istringstream ss;
+    std::string file_contents, line;
+    int num, field_idx, pos, read;
+    unsigned int ts, reported = 0;
+    uint16_t addr, val;
+    char type[16];
+    std::vector<uint16_t> vect(num_fields);
+
+    if (!ReadFileToString(buf_path, &file_contents)) {
+        ALOGE("Unable to read logbuffer path: %s - %s", buf_path.c_str(), strerror(errno));
+        return;
+    }
+
+    ss.str(file_contents);
+    while (getline(ss, line)) {
+        num = sscanf(line.c_str(), "[%u.%*u] %15s%n", &ts, type, &pos);
+        if (num != 2 || strncmp(type, code, strlen(code)))
+            continue;
+
+        if (ts <= last_check_time) {
+            reported++;
+            continue;
+        }
+
+        for (field_idx = 0; field_idx < num_fields; field_idx++, pos += read) {
+            if (format == FormatAddrWithVal) {
+                num = sscanf(&line.c_str()[pos], " %2" SCNx16 ":%4" SCNx16 "%n", &addr, &val,
+                             &read);
+                if (num != 2 || (num_fields - field_idx < 2))
+                    break;
+                vect[field_idx++] = addr;
+                vect[field_idx] = val;
+            } else if (format == FormatIgnoreAddr) {
+                num = sscanf(&line.c_str()[pos], " %*2" SCNx16 ":%4" SCNx16 "%n", &val, &read);
+                if (num != 1)
+                    break;
+                vect[field_idx] = val;
+            } else if (format == FormatNoAddr) {
+                 num = sscanf(&line.c_str()[pos], " %4" SCNx16 "%n", &val, &read);
+                if (num != 1)
+                    break;
+                vect[field_idx] = val;
+            } else {
+                break;
+            }
+        }
+
+        if (field_idx == num_fields)
+            events.push_back(vect);
+    }
+    if (events.size() > 0 || reported > 0)
+        ALOGD("%s: new:%zu, reported:%d", code, events.size(), reported);
+
+    return;
 }
 
 }  // namespace pixel

@@ -58,7 +58,7 @@ bool HintManager::ValidateHint(const std::string& hint_type) const {
 
 bool HintManager::IsHintSupported(const std::string& hint_type) const {
     if (actions_.find(hint_type) == actions_.end()) {
-        LOG(INFO) << "Hint type not present in actions: " << hint_type;
+        LOG(DEBUG) << "Hint type not present in actions: " << hint_type;
         return false;
     }
     return true;
@@ -281,9 +281,9 @@ bool HintManager::Start() {
     return nm_->Start();
 }
 
-std::shared_ptr<HintManager> HintManager::mInstance = nullptr;
+std::unique_ptr<HintManager> HintManager::sInstance = nullptr;
 
-std::shared_ptr<HintManager> HintManager::Reload(bool start) {
+void HintManager::Reload(bool start) {
     std::string config_path = "/vendor/etc/";
     if (android::base::GetBoolProperty(kConfigDebugPathProperty.data(), false)) {
         config_path = "/data/vendor/etc/";
@@ -295,22 +295,36 @@ std::shared_ptr<HintManager> HintManager::Reload(bool start) {
     LOG(INFO) << "Pixel Power HAL AIDL Service with Extension is starting with config: "
               << config_path;
     // Reload and start the HintManager
-    mInstance = HintManager::GetFromJSON(config_path, start);
-    if (!mInstance) {
+    HintManager::GetFromJSON(config_path, start);
+    if (!sInstance) {
         LOG(FATAL) << "Invalid config: " << config_path;
     }
-    return mInstance;
 }
 
-std::shared_ptr<HintManager> HintManager::GetInstance() {
-    if (!mInstance) {
-        mInstance = HintManager::Reload(false);
+HintManager *HintManager::GetInstance() {
+    if (sInstance == nullptr) {
+        HintManager::Reload(false);
     }
-    return mInstance;
+    return sInstance.get();
 }
 
-std::unique_ptr<HintManager> HintManager::GetFromJSON(
-    const std::string& config_path, bool start) {
+static std::optional<std::string> ParseGpuSysfsNode(const std::string &json_doc) {
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    std::string errorMessage;
+    if (!reader->parse(&*json_doc.begin(), &*json_doc.end(), &root, &errorMessage)) {
+        LOG(ERROR) << "Failed to parse JSON config: " << errorMessage;
+        return {};
+    }
+
+    if (root["GpuSysfsPath"].empty() || !root["GpuSysfsPath"].isString()) {
+        return {};
+    }
+    return {root["GpuSysfsPath"].asString()};
+}
+
+HintManager *HintManager::GetFromJSON(const std::string &config_path, bool start) {
     std::string json_doc;
 
     if (!android::base::ReadFileToString(config_path, &json_doc)) {
@@ -335,10 +349,12 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
         return nullptr;
     }
 
-    sp<NodeLooperThread> nm = new NodeLooperThread(std::move(nodes));
-    std::unique_ptr<HintManager> hm = std::make_unique<HintManager>(std::move(nm), actions, adpfs);
+    auto const gpu_sysfs_node = ParseGpuSysfsNode(json_doc);
 
-    if (!HintManager::InitHintStatus(hm)) {
+    sp<NodeLooperThread> nm = new NodeLooperThread(std::move(nodes));
+    sInstance = std::make_unique<HintManager>(std::move(nm), actions, adpfs, gpu_sysfs_node);
+
+    if (!HintManager::InitHintStatus(sInstance)) {
         LOG(ERROR) << "Failed to initialize hint status";
         return nullptr;
     }
@@ -346,9 +362,10 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
     LOG(INFO) << "Initialized HintManager from JSON config: " << config_path;
 
     if (start) {
-        hm->Start();
+        sInstance->Start();
     }
-    return hm;
+
+    return HintManager::GetInstance();
 }
 
 std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
@@ -495,9 +512,19 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
             LOG(VERBOSE) << "Node[" << i << "]'s HoldFd: " << std::boolalpha
                          << hold_fd << std::noboolalpha;
 
+            bool write_only = false;
+            if (nodes[i]["WriteOnly"].empty() || !nodes[i]["WriteOnly"].isBool()) {
+                LOG(INFO) << "Failed to read Node[" << i
+                          << "]'s WriteOnly, set to 'false'";
+            } else {
+                write_only = nodes[i]["WriteOnly"].asBool();
+            }
+            LOG(VERBOSE) << "Node[" << i << "]'s WriteOnly: " << std::boolalpha
+                         << write_only << std::noboolalpha;
+
             nodes_parsed.emplace_back(std::make_unique<FileNode>(
                     name, path, values_parsed, static_cast<std::size_t>(default_index), reset,
-                    truncate, hold_fd));
+                    truncate, hold_fd, write_only));
         } else {
             nodes_parsed.emplace_back(std::make_unique<PropertyNode>(
                 name, path, values_parsed,
@@ -634,6 +661,24 @@ std::unordered_map<std::string, Hint> HintManager::ParseActions(
     return actions_parsed;
 }
 
+#define ADPF_PARSE(VARIABLE, ENTRY, TYPE)                                                        \
+    static_assert(std::is_same<decltype(adpfs[i][ENTRY].as##TYPE()), decltype(VARIABLE)>::value, \
+                  "Parser type mismatch");                                                       \
+    if (adpfs[i][ENTRY].empty() || !adpfs[i][ENTRY].is##TYPE()) {                                \
+        LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][" ENTRY "]'s Values";           \
+        adpfs_parsed.clear();                                                                    \
+        return adpfs_parsed;                                                                     \
+    }                                                                                            \
+    VARIABLE = adpfs[i][ENTRY].as##TYPE()
+
+#define ADPF_PARSE_OPTIONAL(VARIABLE, ENTRY, TYPE)                     \
+    static_assert(std::is_same<decltype(adpfs[i][ENTRY].as##TYPE()),   \
+                               decltype(VARIABLE)::value_type>::value, \
+                  "Parser type mismatch");                             \
+    if (!adpfs[i][ENTRY].empty() && adpfs[i][ENTRY].is##TYPE()) {      \
+        VARIABLE = adpfs[i][ENTRY].as##TYPE();                         \
+    }
+
 std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         const std::string &json_doc) {
     // function starts
@@ -655,9 +700,8 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     uint64_t samplingWindowD;
     double staleTimeFactor;
     uint64_t reportingRate;
-    bool earlyBoostOn;
-    double earlyBoostTimeFactor;
     double targetTimeFactor;
+
     std::vector<std::shared_ptr<AdpfConfig>> adpfs_parsed;
     std::set<std::string> name_parsed;
     Json::Value root;
@@ -670,6 +714,9 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     }
     Json::Value adpfs = root["AdpfConfig"];
     for (Json::Value::ArrayIndex i = 0; i < adpfs.size(); ++i) {
+        std::optional<bool> gpuBoost;
+        std::optional<uint64_t> gpuBoostCapacityMax;
+        uint64_t gpuCapacityLoadUpHeadroom = 0;
         std::string name = adpfs[i]["Name"].asString();
         LOG(VERBOSE) << "AdpfConfig[" << i << "]'s Name: " << name;
         if (name.empty()) {
@@ -685,162 +732,102 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             return adpfs_parsed;
         }
 
-        if (adpfs[i]["PID_On"].empty() || !adpfs[i]["PID_On"].isBool()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_On]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        pidOn = adpfs[i]["PID_On"].asBool();
+        // heuristic boost configs
+        std::optional<bool> heuristicBoostOn;
+        std::optional<uint32_t> hBoostOnMissedCycles;
+        std::optional<double> hBoostOffMaxAvgRatio;
+        std::optional<uint32_t> hBoostOffMissedCycles;
+        std::optional<double> hBoostPidPuFactor;
+        std::optional<uint32_t> hBoostUclampMin;
+        std::optional<double> jankCheckTimeFactor;
+        std::optional<uint32_t> lowFrameRateThreshold;
+        std::optional<uint32_t> maxRecordsNum;
 
-        if (adpfs[i]["PID_Po"].empty() || !adpfs[i]["PID_Po"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_Po]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        pidPOver = adpfs[i]["PID_Po"].asDouble();
+        std::optional<uint32_t> uclampMinLoadUp;
+        std::optional<uint32_t> uclampMinLoadReset;
+        std::optional<int32_t> uclampMaxEfficientBase;
+        std::optional<int32_t> uclampMaxEfficientOffset;
 
-        if (adpfs[i]["PID_Pu"].empty() || !adpfs[i]["PID_Pu"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_Pu]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        pidPUnder = adpfs[i]["PID_Pu"].asDouble();
+        ADPF_PARSE(pidOn, "PID_On", Bool);
+        ADPF_PARSE(pidPOver, "PID_Po", Double);
+        ADPF_PARSE(pidPUnder, "PID_Pu", Double);
+        ADPF_PARSE(pidI, "PID_I", Double);
+        ADPF_PARSE(pidIInit, "PID_I_Init", Int64);
+        ADPF_PARSE(pidIHighLimit, "PID_I_High", Int64);
+        ADPF_PARSE(pidILowLimit, "PID_I_Low", Int64);
+        ADPF_PARSE(pidDOver, "PID_Do", Double);
+        ADPF_PARSE(pidDUnder, "PID_Du", Double);
+        ADPF_PARSE(adpfUclamp, "UclampMin_On", Bool);
+        ADPF_PARSE(uclampMinInit, "UclampMin_Init", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadUp, "UclampMin_LoadUp", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadReset, "UclampMin_LoadReset", UInt);
+        ADPF_PARSE(uclampMinHighLimit, "UclampMin_High", UInt);
+        ADPF_PARSE(uclampMinLowLimit, "UclampMin_Low", UInt);
+        ADPF_PARSE(samplingWindowP, "SamplingWindow_P", UInt64);
+        ADPF_PARSE(samplingWindowI, "SamplingWindow_I", UInt64);
+        ADPF_PARSE(samplingWindowD, "SamplingWindow_D", UInt64);
+        ADPF_PARSE(staleTimeFactor, "StaleTimeFactor", Double);
+        ADPF_PARSE(reportingRate, "ReportingRateLimitNs", UInt64);
+        ADPF_PARSE(targetTimeFactor, "TargetTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(heuristicBoostOn, "HeuristicBoost_On", Bool);
+        ADPF_PARSE_OPTIONAL(hBoostOnMissedCycles, "HBoostOnMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostOffMaxAvgRatio, "HBoostOffMaxAvgRatio", Double);
+        ADPF_PARSE_OPTIONAL(hBoostOffMissedCycles, "HBoostOffMissedCycles", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostPidPuFactor, "HBoostPidPuFactor", Double);
+        ADPF_PARSE_OPTIONAL(hBoostUclampMin, "HBoostUclampMin", UInt);
+        ADPF_PARSE_OPTIONAL(jankCheckTimeFactor, "JankCheckTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(lowFrameRateThreshold, "LowFrameRateThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(maxRecordsNum, "MaxRecordsNum", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientBase, "UclampMax_EfficientBase", Int);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientOffset, "UclampMax_EfficientOffset", Int);
 
-        if (adpfs[i]["PID_I"].empty() || !adpfs[i]["PID_I"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_I]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
+        if (!adpfs[i]["GpuBoost"].empty() && adpfs[i]["GpuBoost"].isBool()) {
+            gpuBoost = adpfs[i]["GpuBoost"].asBool();
         }
-        pidI = adpfs[i]["PID_I"].asDouble();
+        if (!adpfs[i]["GpuCapacityBoostMax"].empty() &&
+            adpfs[i]["GpuCapacityBoostMax"].isUInt64()) {
+            gpuBoostCapacityMax = adpfs[i]["GpuCapacityBoostMax"].asUInt64();
+        }
+        if (!adpfs[i]["GpuCapacityLoadUpHeadroom"].empty() &&
+            adpfs[i]["GpuCapacityLoadUpHeadroom"].isUInt64()) {
+            gpuCapacityLoadUpHeadroom = adpfs[i]["GpuCapacityLoadUpHeadroom"].asUInt64();
+        }
 
-        if (adpfs[i]["PID_I_Init"].empty() || !adpfs[i]["PID_I_Init"].isInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_I_Init]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
+        // Check all the heuristic configurations are there if heuristic boost is going to
+        // be used.
+        if (heuristicBoostOn.has_value()) {
+            if (!hBoostOnMissedCycles.has_value() || !hBoostOffMaxAvgRatio.has_value() ||
+                !hBoostOffMissedCycles.has_value() || !hBoostPidPuFactor.has_value() ||
+                !hBoostUclampMin.has_value() || !jankCheckTimeFactor.has_value() ||
+                !lowFrameRateThreshold.has_value() || !maxRecordsNum.has_value()) {
+                LOG(ERROR) << "Part of the heuristic boost configurations are missing!";
+                adpfs_parsed.clear();
+                return adpfs_parsed;
+            }
         }
-        pidIInit = adpfs[i]["PID_I_Init"].asInt64();
 
-        if (adpfs[i]["PID_I_High"].empty() || !adpfs[i]["PID_I_High"].isInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_I_High]'s Values";
+        if (uclampMaxEfficientBase.has_value() != uclampMaxEfficientBase.has_value()) {
+            LOG(ERROR) << "Part of the power efficiency configuration is missing!";
             adpfs_parsed.clear();
             return adpfs_parsed;
         }
-        pidIHighLimit = adpfs[i]["PID_I_High"].asInt64();
 
-        if (adpfs[i]["PID_I_Low"].empty() || !adpfs[i]["PID_I_Low"].isInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_I_Low]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
+        if (!uclampMinLoadUp.has_value()) {
+            uclampMinLoadUp = uclampMinHighLimit;
         }
-        pidILowLimit = adpfs[i]["PID_I_Low"].asInt64();
-
-        if (adpfs[i]["PID_Do"].empty() || !adpfs[i]["PID_Do"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_Do]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
+        if (!uclampMinLoadReset.has_value()) {
+            uclampMinLoadReset = uclampMinHighLimit;
         }
-        pidDOver = adpfs[i]["PID_Do"].asDouble();
-
-        if (adpfs[i]["PID_Du"].empty() || !adpfs[i]["PID_Du"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][PID_Du]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        pidDUnder = adpfs[i]["PID_Du"].asDouble();
-
-        if (adpfs[i]["UclampMin_On"].empty() || !adpfs[i]["UclampMin_On"].isBool()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][UclampMin_On]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        adpfUclamp = adpfs[i]["UclampMin_On"].asBool();
-
-        if (adpfs[i]["UclampMin_Init"].empty() || !adpfs[i]["UclampMin_Init"].isInt()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][UclampMin_Init]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        uclampMinInit = adpfs[i]["UclampMin_Init"].asInt();
-
-        if (adpfs[i]["UclampMin_High"].empty() || !adpfs[i]["UclampMin_High"].isUInt()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][UclampMin_High]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        uclampMinHighLimit = adpfs[i]["UclampMin_High"].asUInt();
-
-        if (adpfs[i]["UclampMin_Low"].empty() || !adpfs[i]["UclampMin_Low"].isUInt()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][UclampMin_Low]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        uclampMinLowLimit = adpfs[i]["UclampMin_Low"].asUInt();
-
-        if (adpfs[i]["SamplingWindow_P"].empty() || !adpfs[i]["SamplingWindow_P"].isUInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][SamplingWindow_P]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        samplingWindowP = adpfs[i]["SamplingWindow_P"].asUInt64();
-
-        if (adpfs[i]["SamplingWindow_I"].empty() || !adpfs[i]["SamplingWindow_I"].isUInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][SamplingWindow_I]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        samplingWindowI = adpfs[i]["SamplingWindow_I"].asUInt64();
-
-        if (adpfs[i]["SamplingWindow_D"].empty() || !adpfs[i]["SamplingWindow_D"].isUInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][SamplingWindow_D]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        samplingWindowD = adpfs[i]["SamplingWindow_D"].asUInt64();
-
-        if (adpfs[i]["StaleTimeFactor"].empty() || !adpfs[i]["StaleTimeFactor"].isUInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][StaleTimeFactor]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        staleTimeFactor = adpfs[i]["StaleTimeFactor"].asDouble();
-
-        if (adpfs[i]["ReportingRateLimitNs"].empty() ||
-            !adpfs[i]["ReportingRateLimitNs"].isInt64()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name
-                       << "][ReportingRateLimitNs]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        reportingRate = adpfs[i]["ReportingRateLimitNs"].asInt64();
-
-        if (adpfs[i]["EarlyBoost_On"].empty() || !adpfs[i]["EarlyBoost_On"].isBool()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][EarlyBoost_On]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        earlyBoostOn = adpfs[i]["EarlyBoost_On"].asBool();
-
-        if (adpfs[i]["EarlyBoost_TimeFactor"].empty() ||
-            !adpfs[i]["EarlyBoost_TimeFactor"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name
-                       << "][EarlyBoost_TimeFactor]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        earlyBoostTimeFactor = adpfs[i]["EarlyBoost_TimeFactor"].asDouble();
-
-        if (adpfs[i]["TargetTimeFactor"].empty() || !adpfs[i]["TargetTimeFactor"].isDouble()) {
-            LOG(ERROR) << "Failed to read AdpfConfig[" << name << "][TargetTimeFactor]'s Values";
-            adpfs_parsed.clear();
-            return adpfs_parsed;
-        }
-        targetTimeFactor = adpfs[i]["TargetTimeFactor"].asDouble();
 
         adpfs_parsed.emplace_back(std::make_shared<AdpfConfig>(
                 name, pidOn, pidPOver, pidPUnder, pidI, pidIInit, pidIHighLimit, pidILowLimit,
                 pidDOver, pidDUnder, adpfUclamp, uclampMinInit, uclampMinHighLimit,
                 uclampMinLowLimit, samplingWindowP, samplingWindowI, samplingWindowD, reportingRate,
-                earlyBoostOn, earlyBoostTimeFactor, targetTimeFactor, staleTimeFactor));
+                targetTimeFactor, staleTimeFactor, gpuBoost, gpuBoostCapacityMax,
+                gpuCapacityLoadUpHeadroom, heuristicBoostOn, hBoostOnMissedCycles,
+                hBoostOffMaxAvgRatio, hBoostOffMissedCycles, hBoostPidPuFactor, hBoostUclampMin,
+                jankCheckTimeFactor, lowFrameRateThreshold, maxRecordsNum, uclampMinLoadUp.value(),
+                uclampMinLoadReset.value(), uclampMaxEfficientBase, uclampMaxEfficientOffset));
     }
     LOG(INFO) << adpfs_parsed.size() << " AdpfConfigs parsed successfully";
     return adpfs_parsed;
@@ -860,6 +847,19 @@ bool HintManager::SetAdpfProfile(const std::string &profile_name) {
         }
     }
     return false;
+}
+
+bool HintManager::IsAdpfProfileSupported(const std::string &profile_name) const {
+    for (std::size_t i = 0; i < adpfs_.size(); ++i) {
+        if (adpfs_[i]->mName == profile_name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<std::string> HintManager::gpu_sysfs_config_path() const {
+    return gpu_sysfs_config_path_;
 }
 
 }  // namespace perfmgr

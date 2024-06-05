@@ -4,10 +4,6 @@ PRODUCT_COPY_FILES += \
 BOARD_VENDOR_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/common/vendor
 SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/common/system_ext
 
-# Write flags to the vendor space in /misc partition.
-PRODUCT_PACKAGES += \
-    misc_writer
-
 # Enable atrace categories and tools for pixel devices
 PRODUCT_PACKAGES += \
     atrace_categories.txt.pixel \
@@ -16,9 +12,6 @@ PRODUCT_PACKAGES += \
 # fastbootd
 PRODUCT_PACKAGES += \
     fastbootd
-
-# Common ramdump file type.
-BOARD_VENDOR_SEPOLICY_DIRS += hardware/google/pixel-sepolicy/ramdump/common
 
 # Enable RKP support
 PRODUCT_PRODUCT_PROPERTIES += \
@@ -59,5 +52,12 @@ PRODUCT_PROPERTY_OVERRIDES += \
     dalvik.vm.systemuicompilerfilter=speed
 
 # Virtual fingerprint HAL
-PRODUCT_PACKAGES_DEBUG += android.hardware.biometrics.fingerprint-service.example
+PRODUCT_PACKAGES += com.android.hardware.biometrics.fingerprint.virtual
 
+# Virtual face HAL
+PRODUCT_PACKAGES += com.android.hardware.biometrics.face.virtual
+
+# AI Labs artifacts
+ifeq ($(RELEASE_INSTALL_AI_LABS_ARTIFACTS), true)
+  include vendor/google/AILabs/ai_labs.mk
+endif

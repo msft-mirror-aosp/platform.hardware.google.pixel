@@ -40,12 +40,20 @@ enum class MiscWriterActions : int32_t {
   kWriteTimeOffset,
   kSetMaxRamSize,
   kClearMaxRamSize,
+  kWriteTimeRtcOffset,
+  kWriteTimeMinRtc,
+  kSetSotaConfig,
+  kWriteDstTransition,
+  kWriteDstOffset,
+  kSetDisplayMode,
+  kClearDisplayMode,
 
   kUnset = -1,
 };
 
 class MiscWriter {
  public:
+  // sync with bootloader's abl bootloader_message.h
   static constexpr uint32_t kThemeFlagOffsetInVendorSpace = 0;
   static constexpr char kDarkThemeFlag[] = "theme-dark";
   static constexpr uint32_t kSotaFlagOffsetInVendorSpace = 32;
@@ -61,6 +69,20 @@ class MiscWriter {
   static constexpr char kTimeOffset[] = "timeoffset=";
   static constexpr uint32_t kMaxRamSizeOffsetInVendorSpace = 192;
   static constexpr char kMaxRamSize[] = "max-ram-size=";
+  static constexpr uint32_t kSotaStateOffsetInVendorSpace = 224;
+  static constexpr uint32_t kRTimeRtcOffsetValOffsetInVendorSpace = 264;
+  static constexpr char kTimeRtcOffset[] = "timertcoffset=";
+  static constexpr uint32_t kRTimeMinRtcValOffsetInVendorSpace = 296;
+  static constexpr char kTimeMinRtc[] = "timeminrtc=";
+  static constexpr uint32_t kFaceauthEvalValOffsetInVendorSpace = 328;
+  static constexpr uint32_t kSotaScheduleShipmodeOffsetInVendorSpace = 360;
+  static constexpr uint32_t kDstTransitionOffsetInVendorSpace = 392;
+  static constexpr char kDstTransition[] = "dst-transition=";
+  static constexpr uint32_t kDstOffsetOffsetInVendorSpace = 424;
+  static constexpr char kDstOffset[] = "dst-offset=";
+  static constexpr uint32_t kDisplayModeOffsetInVendorSpace = 456;
+  static constexpr char kDisplayModePrefix[] = "mode=";
+  // Next available space = 488
 
   // Minimum and maximum valid value for max-ram-size
   static constexpr int32_t kRamSizeDefault = -1;
@@ -70,6 +92,9 @@ class MiscWriter {
   // Minimum and maximum time zone are -12 and 14 hours from GMT
   static constexpr int32_t kMinTimeOffset = -12 * 60 * 60 * 1000;
   static constexpr int32_t kMaxTimeOffset = 14 * 60 * 60 * 1000;
+
+  // Maximum display mode string length
+  static constexpr size_t kDisplayModeMaxSize = 32 - sizeof(kDisplayModePrefix);
 
   // Returns true of |size| bytes data starting from |offset| is fully inside the vendor space.
   static bool OffsetAndSizeInVendorSpace(size_t offset, size_t size);
