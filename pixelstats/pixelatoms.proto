@@ -126,6 +126,9 @@ message Atom {
       MmGcmaSnapshot mm_gcma_snapshot = 105071;
       MmGcmaStats mm_gcma_stats = 105072;
       VendorAudioUsbDeviceCapabilityStats vendor_audio_usb_device_capability_stats = 105073 [(android.os.statsd.module) = "pixelaudio"];
+      BatteryTimeToFullStatsReported battery_time_to_full_stats_reported = 105074;
+      VendorAudioDirectUsbAccessUsageStats vendor_audio_direct_usb_access_usage_stats = 105075 [(android.os.statsd.module) = "pixelaudio"];
+      VendorAudioUsbConfigStats vendor_audio_usb_config_stats = 105076 [(android.os.statsd.module) = "pixelaudio"];
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -559,6 +562,8 @@ message VendorSpeakerStatsReported {
   optional int32 excursion = 5;
   /* The speaker's heart beat count */
   optional int32 heartbeat = 6;
+  /* The speaker's version */
+  optional int32 version = 7;
 }
 
 /* A message containing how many times of ufs host reset */
@@ -2478,11 +2483,11 @@ message VendorAudioUsbDeviceCapabilityStats {
     SUPER_SPEED = 3;
   }
   /* USB Speed */
-  optional UsbSpeed usb_speed = 4;
+  optional UsbSpeed usb_speed = 4 [deprecated = true];
 
   /* Data Packets Interval in ms. Expected value is between 125 and 1000.*/
-  optional int32 playback_data_packet_interval = 5;
-  optional int32 capture_data_packet_interval = 6;
+  repeated int32 playback_data_packet_interval = 5;
+  repeated int32 capture_data_packet_interval = 6;
 
   /* List of supported sample rates in increasing order. */
   repeated int32 playback_supported_sample_rates = 7;
@@ -2508,6 +2513,69 @@ message VendorAudioUsbDeviceCapabilityStats {
   /* Supported endian */
   optional bool is_big_endian = 13;
 
+  /* Is USB device support playback */
+  optional bool is_playback = 14;
+
   /* Duration connected */
-  optional int32 duration_second_connected = 14;
+  optional int32 duration_second_connected = 15;
+};
+
+/*
+ * A message containing battery time to full stats
+ * Logged from:
+ *    hardware/google/pixel/pixelstats/BatteryTTFReporter.cpp
+ */
+message BatteryTimeToFullStatsReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The charge_counter and elap of each soc
+  optional int32 ttf_type = 2;
+  optional int32 ttf_range = 3;
+  optional int32 soc_0 = 4;
+  optional int32 soc_1 = 5;
+  optional int32 soc_2 = 6;
+  optional int32 soc_3 = 7;
+  optional int32 soc_4 = 8;
+  optional int32 soc_5 = 9;
+  optional int32 soc_6 = 10;
+  optional int32 soc_7 = 11;
+  optional int32 soc_8 = 12;
+  optional int32 soc_9 = 13;
+}
+
+/*
+ * A message containing Direct USB Access event.
+ */
+message VendorAudioDirectUsbAccessUsageStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  optional int32 duration_second = 2;
+};
+
+/*
+ * A message containing Usb Config event.
+ */
+message VendorAudioUsbConfigStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Is config for playback or capture */
+  optional bool is_playback = 2;
+
+  /* Is config for hifi */
+  optional bool has_hifi = 3;
+
+  /* Sample rate used */
+  optional int32 sample_rate = 4;
+
+  /* Channel used */
+  optional int32 channel = 5;
+
+  /* Pcm Type used */
+  optional int32 pcm_type = 6;
+
+  /* Duration in second */
+  optional int32 duration_second = 7;
 };
