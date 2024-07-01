@@ -125,6 +125,15 @@ message Atom {
       MmProcessUsageByOomGroupSnapshot mm_process_usage_by_oom_group_snapshot = 105070;
       MmGcmaSnapshot mm_gcma_snapshot = 105071;
       MmGcmaStats mm_gcma_stats = 105072;
+      VendorAudioUsbDeviceCapabilityStats vendor_audio_usb_device_capability_stats = 105073 [(android.os.statsd.module) = "pixelaudio"];
+      BatteryTimeToFullStatsReported battery_time_to_full_stats_reported = 105074;
+      VendorAudioDirectUsbAccessUsageStats vendor_audio_direct_usb_access_usage_stats = 105075 [(android.os.statsd.module) = "pixelaudio"];
+      VendorAudioUsbConfigStats vendor_audio_usb_config_stats = 105076 [(android.os.statsd.module) = "pixelaudio"];
+      GpuFrozenAppsMemoryPerUid gpu_frozen_apps_memory_per_uid = 105078;
+      RepairModeEntered repair_mode_entered = 105079;
+      RepairModeExited repair_mode_exited = 105080;
+      RepairModeLowStorageReported repair_mode_low_storage_reported = 105081;
+      RepairModeErrorReported repair_mode_error_reported = 105082;
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -558,6 +567,8 @@ message VendorSpeakerStatsReported {
   optional int32 excursion = 5;
   /* The speaker's heart beat count */
   optional int32 heartbeat = 6;
+  /* The speaker's version */
+  optional int32 version = 7;
 }
 
 /* A message containing how many times of ufs host reset */
@@ -2453,3 +2464,221 @@ message MmGcmaStats {
   repeated int64 latency_histogram = 6;
 }
 
+/*
+ * A message containing the USB audio capability of the connected accessories.
+ */
+message VendorAudioUsbDeviceCapabilityStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  enum UsbMode {
+    UNKNOWN_MODE = 0;
+    ASYNC_MODE = 1;
+    ADAPTIVE_MODE = 2;
+    SYNC_MODE = 3;
+  }
+  /* USB Modes */
+  repeated UsbMode playback_supported_modes = 2;
+  repeated UsbMode capture_supported_modes = 3;
+
+  enum UsbSpeed {
+    OTHER_SPEED = 0;
+    FULL_SPEED = 1;
+    HIGH_SPEED = 2;
+    SUPER_SPEED = 3;
+  }
+  /* USB Speed */
+  optional UsbSpeed usb_speed = 4 [deprecated = true];
+
+  /* Data Packets Interval in ms. Expected value is between 125 and 1000.*/
+  repeated int32 playback_data_packet_interval = 5;
+  repeated int32 capture_data_packet_interval = 6;
+
+  /* List of supported sample rates in increasing order. */
+  repeated int32 playback_supported_sample_rates = 7;
+  repeated int32 capture_supported_sample_rates = 8;
+
+  /* Maximum number of channels supported */
+  optional int32 playback_supported_channel_count = 9;
+  optional int32 capture_supported_channel_count = 10;
+
+  enum PcmType {
+    DEFAULT = 0;
+    INT16_BIT = 1;
+    INT32_BIT = 2;
+    FIXED_Q824 = 3;
+    FLOAT32_BIT = 4;
+    INT24_BIT = 5;
+    DSD32_BIT = 6;
+  }
+  /* Supported PCM Type */
+  repeated PcmType playback_supported_pcm_types = 11;
+  repeated PcmType capture_supported_pcm_types = 12;
+
+  /* Supported endian */
+  optional bool is_big_endian = 13;
+
+  /* Is USB device support playback */
+  optional bool is_playback = 14;
+
+  /* Duration connected */
+  optional int32 duration_second_connected = 15;
+};
+
+/*
+ * A message containing battery time to full stats
+ * Logged from:
+ *    hardware/google/pixel/pixelstats/BatteryTTFReporter.cpp
+ */
+message BatteryTimeToFullStatsReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The charge_counter and elap of each soc
+  optional int32 ttf_type = 2;
+  optional int32 ttf_range = 3;
+  optional int32 soc_0 = 4;
+  optional int32 soc_1 = 5;
+  optional int32 soc_2 = 6;
+  optional int32 soc_3 = 7;
+  optional int32 soc_4 = 8;
+  optional int32 soc_5 = 9;
+  optional int32 soc_6 = 10;
+  optional int32 soc_7 = 11;
+  optional int32 soc_8 = 12;
+  optional int32 soc_9 = 13;
+}
+
+/*
+ * A message containing Direct USB Access event.
+ */
+message VendorAudioDirectUsbAccessUsageStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  optional int32 duration_second = 2;
+};
+
+/*
+ * A message containing Usb Config event.
+ */
+message VendorAudioUsbConfigStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Is config for playback or capture */
+  optional bool is_playback = 2;
+
+  /* Is config for hifi */
+  optional bool has_hifi = 3;
+
+  /* Sample rate used */
+  optional int32 sample_rate = 4;
+
+  /* Channel used */
+  optional int32 channel = 5;
+
+  /* Pcm Type used */
+  optional int32 pcm_type = 6;
+
+  /* Duration in second */
+  optional int32 duration_second = 7;
+};
+
+/* GPU memory allocation information for frozen apps */
+message GpuFrozenAppsMemoryPerUid {
+  /* Vendor reverse domain name (expecting "com.google.pixel"). */
+  optional string reverse_domain_name = 1;
+
+  /* UID of the frozen app. */
+  optional int32 uid = 2 [(android.os.statsd.is_uid) = true];
+
+  /* Total amount of GPU memory allocated by this app, in kilobytes. */
+  optional int64 gpu_memory_kb = 3;
+}
+
+/**
+ * Logs for repair mode enter
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 5 times in 1 min | Avg: 3 times per device per year
+ */
+ message RepairModeEntered {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on device when entering repair mode in megabyte
+  optional int64 storage_size_mb = 2;
+}
+
+/**
+ * Logs for repair mode exit
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 5 times in 1 min | Avg: 3 times per device per year
+ */
+message RepairModeExited {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on device when exiting repair mode in megabyte
+  optional int64 storage_size_mb = 2;
+  // whether diagnostic tool is executed during repair mode
+  // false if diagnostic tool is never run
+  // true if diagnostic is run once or more
+  optional bool is_diagnostic_run = 3;
+
+  // how user auth/verify the credential to exit repair mode
+  enum ExitMethod {
+    UNSPECIFIED = 0;
+    // auth by google account
+    GAUTH = 1;
+    // auth by screen lock on the device
+    SCREEN_LOCK = 2;
+  }
+  // method for auth when exiting repair mode
+  optional ExitMethod exit_method = 4;
+}
+
+/**
+ * Logs when a user cannot enter repair mode due to insufficient storage
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 1 time in 5 mins | Avg: 20 times per device per year
+ */
+message RepairModeLowStorageReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on the device in megabyte
+  optional int64 storage_size_mb = 2;
+}
+
+/**
+ * Logs programmatic error that prevent users from entering repair mode
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 1 time in 3 mins | Avg: 2 times per device per year
+ */
+message RepairModeErrorReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // Error type that prevent user from entering repair mode
+  enum ErrorType {
+    UNSPECIFIED = 0;
+    // Dynamic system failed to install image
+    INSTALLED_FAILED = 1;
+    // Failed to enable Dynamic system
+    ENABLE_DYN_FAILED = 2;
+    // Failed to reboot
+    REBOOT_FAILED = 3;
+  }
+
+  optional ErrorType error_type = 2;
+}
