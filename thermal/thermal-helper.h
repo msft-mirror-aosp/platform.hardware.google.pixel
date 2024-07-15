@@ -33,6 +33,7 @@
 #include "utils/powerhal_helper.h"
 #include "utils/thermal_files.h"
 #include "utils/thermal_info.h"
+#include "utils/thermal_predictions_helper.h"
 #include "utils/thermal_stats_helper.h"
 #include "utils/thermal_throttling.h"
 #include "utils/thermal_watcher.h"
@@ -241,6 +242,7 @@ class ThermalHelperImpl : public ThermalHelper {
             supported_powerhint_map_;
     PowerHalService power_hal_service_;
     ThermalStatsHelper thermal_stats_helper_;
+    ThermalPredictionsHelper thermal_predictions_helper_;
     mutable std::shared_mutex sensor_status_map_mutex_;
     std::unordered_map<std::string, SensorStatus> sensor_status_map_;
 };

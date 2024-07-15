@@ -189,6 +189,11 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
         ret = false;
     }
 
+    if (!thermal_predictions_helper_.initializePredictionSensors(sensor_info_map_)) {
+        LOG(ERROR) << "Failed to initialize prediction sensors";
+        ret = false;
+    }
+
     if (ret) {
         if (!thermal_stats_helper_.initializeStats(config, sensor_info_map_,
                                                    cooling_device_info_map_, this)) {
@@ -289,7 +294,8 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
             }
         }
         // Check predictor info config
-        if (name_status_pair.second.predictor_info != nullptr) {
+        if ((name_status_pair.second.predictor_info != nullptr) &&
+            name_status_pair.second.predictor_info->support_pid_compensation) {
             std::string predict_sensor_name = name_status_pair.second.predictor_info->sensor;
             if (!(sensor_info_map_.count(predict_sensor_name))) {
                 LOG(ERROR) << name_status_pair.first << "'s predictor " << predict_sensor_name
@@ -307,31 +313,29 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
                 break;
             }
 
-            if (name_status_pair.second.predictor_info->support_pid_compensation) {
-                std::vector<float> output_template;
-                size_t prediction_weight_count =
-                        name_status_pair.second.predictor_info->prediction_weights.size();
-                // read predictor out to get the size of output vector
-                ::thermal::vtestimator::VtEstimatorStatus predict_check =
-                        predictor_sensor_info.virtual_sensor_info->vt_estimator->GetAllPredictions(
-                                &output_template);
+            std::vector<float> output_template;
+            size_t prediction_weight_count =
+                    name_status_pair.second.predictor_info->prediction_weights.size();
+            // read predictor out to get the size of output vector
+            ::thermal::vtestimator::VtEstimatorStatus predict_check =
+                    predictor_sensor_info.virtual_sensor_info->vt_estimator->GetAllPredictions(
+                            &output_template);
 
-                if (predict_check != ::thermal::vtestimator::kVtEstimatorOk) {
-                    LOG(ERROR) << "Failed to get output size of " << name_status_pair.first
-                               << "'s predictor " << predict_sensor_name
-                               << " GetAllPredictions ret: " << ret << ")";
-                    ret = false;
-                    break;
-                }
+            if (predict_check != ::thermal::vtestimator::kVtEstimatorOk) {
+                LOG(ERROR) << "Failed to get output size of " << name_status_pair.first
+                           << "'s predictor " << predict_sensor_name
+                           << " GetAllPredictions ret: " << ret << ")";
+                ret = false;
+                break;
+            }
 
-                if (prediction_weight_count != output_template.size()) {
-                    LOG(ERROR) << "Sensor [" << name_status_pair.first << "]: "
-                               << "prediction weights size (" << prediction_weight_count
-                               << ") doesn't match predictor [" << predict_sensor_name
-                               << "]'s output size (" << output_template.size() << ")";
-                    ret = false;
-                    break;
-                }
+            if (prediction_weight_count != output_template.size()) {
+                LOG(ERROR) << "Sensor [" << name_status_pair.first
+                           << "]: " << "prediction weights size (" << prediction_weight_count
+                           << ") doesn't match predictor [" << predict_sensor_name
+                           << "]'s output size (" << output_template.size() << ")";
+                ret = false;
+                break;
             }
         }
     }
@@ -1105,6 +1109,9 @@ bool ThermalHelperImpl::runVirtualTempEstimator(std::string_view sensor_name,
             sensor_info.virtual_sensor_info->vt_estimator->Estimate(model_inputs, &model_outputs);
 
     if (ret == ::thermal::vtestimator::kVtEstimatorOk) {
+        if (sensor_info.predictor_info && sensor_info.predictor_info->supports_predictions) {
+            thermal_predictions_helper_.updateSensor(sensor_name, model_outputs);
+        }
         *outputs = model_outputs;
         return true;
     } else if (ret == ::thermal::vtestimator::kVtEstimatorLowConfidence ||
@@ -1316,8 +1323,10 @@ bool ThermalHelperImpl::readThermalSensor(std::string_view sensor_name, float *t
             }
         }
 
-        if ((sensor_info.virtual_sensor_info->formula == FormulaOption::USE_ML_MODEL) ||
-            (sensor_info.virtual_sensor_info->formula == FormulaOption::USE_LINEAR_MODEL)) {
+        if (sensor_info.virtual_sensor_info->formula == FormulaOption::PREVIOUSLY_PREDICTED) {
+            *temp = thermal_predictions_helper_.readSensor(sensor_name);
+        } else if ((sensor_info.virtual_sensor_info->formula == FormulaOption::USE_ML_MODEL) ||
+                   (sensor_info.virtual_sensor_info->formula == FormulaOption::USE_LINEAR_MODEL)) {
             std::vector<float> vt_estimator_out;
             if (!runVirtualTempEstimator(sensor_name, sensor_log_map, force_no_cache,
                                          &vt_estimator_out)) {
