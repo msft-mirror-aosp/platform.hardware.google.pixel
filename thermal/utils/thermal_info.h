@@ -191,7 +191,8 @@ using ProfileMap = std::unordered_map<std::string, std::unordered_map<std::strin
 struct ThrottlingInfo {
     ThrottlingArray k_po;
     ThrottlingArray k_pu;
-    ThrottlingArray k_i;
+    ThrottlingArray k_io;
+    ThrottlingArray k_iu;
     ThrottlingArray k_d;
     ThrottlingArray i_max;
     ThrottlingArray max_alloc_power;
@@ -225,6 +226,7 @@ struct SensorInfo {
     bool send_powerhint;
     bool is_watch;
     bool is_hidden;
+    ThrottlingSeverity log_level;
     std::unique_ptr<VirtualSensorInfo> virtual_sensor_info;
     std::shared_ptr<ThrottlingInfo> throttling_info;
     std::unique_ptr<PredictorInfo> predictor_info;
