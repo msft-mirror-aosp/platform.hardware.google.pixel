@@ -26,10 +26,10 @@ cc_test {
         "test-vibrator.cpp",
     ],
     static_libs: [
-        "libc++fs",
         "libgmock",
     ],
     shared_libs: [
         "libbase",
+        "PixelVibratorFlagsL26",
     ],
 }

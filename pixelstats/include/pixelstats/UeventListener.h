@@ -21,6 +21,7 @@
 #include <android-base/chrono_utils.h>
 #include <pixelstats/BatteryCapacityReporter.h>
 #include <pixelstats/ChargeStatsReporter.h>
+#include <pixelstats/BatteryFGReporter.h>
 
 namespace android {
 namespace hardware {
@@ -28,7 +29,6 @@ namespace google {
 namespace pixel {
 
 using aidl::android::frameworks::stats::IStats;
-
 /**
  * A class to listen for uevents and report reliability events to
  * the PixelStats HAL.
@@ -47,6 +47,9 @@ class UeventListener {
         const char *const TypeCPartnerPidPath;
         const char *const WirelessChargerPtmcUevent;  // Deprecated.
         const char *const WirelessChargerPtmcPath;    // Deprecated.
+        const std::vector<std::string> FGLearningPath;
+        const char *const FwUpdatePath;
+        const std::vector<std::string> FGModelLoadingPath;
     };
     constexpr static const char *const ssoc_details_path =
             "/sys/class/power_supply/battery/ssoc_details";
@@ -64,7 +67,10 @@ class UeventListener {
                    const std::string overheat_path = overheat_path_default,
                    const std::string charge_metrics_path = charge_metrics_path_default,
                    const std::string typec_partner_vid_path = typec_partner_vid_path_default,
-                   const std::string typec_partner_pid_path = typec_partner_pid_path_default);
+                   const std::string typec_partner_pid_path = typec_partner_pid_path_default,
+                   const std::vector<std::string> fg_learning_path = { "" },
+                   const std::string fw_update_path = "",
+                   const std::vector<std::string> fg_modelloading_path = { "" });
     UeventListener(const struct UeventPaths &paths);
 
     bool ProcessUevent();  // Process a single Uevent.
@@ -90,6 +96,10 @@ class UeventListener {
     void ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_client);
     void ReportGpuEvent(const std::shared_ptr<IStats> &stats_client, const char *driver,
                         const char *gpu_event_type, const char *gpu_event_info);
+    void ReportThermalAbnormalEvent(const std::shared_ptr<IStats> &stats_client,
+                                    const char *devpath, const char *thermal_abnormal_event_type,
+                                    const char *thermal_abnormal_event_info);
+    void ReportFGMetricsEvent(const std::shared_ptr<IStats> &stats_client, const char *driver);
 
     const std::string kAudioUevent;
     const std::string kBatterySSOCPath;
@@ -98,6 +108,10 @@ class UeventListener {
     const std::string kTypeCPartnerUevent;
     const std::string kTypeCPartnerVidPath;
     const std::string kTypeCPartnerPidPath;
+    const std::vector<std::string> kFGLearningPath;
+    const std::string kFwUpdatePath;
+    const std::vector<std::string> kFGModelLoadingPath;
+
 
     const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventType>
             kGpuEventTypeStrToEnum{
@@ -138,10 +152,50 @@ class UeventListener {
                     {"CSF_RESET_OK",
                      PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CSF_RESET_OK},
                     {"CSF_RESET_FAILED", PixelAtoms::GpuEvent::GpuEventInfo::
-                                                 GpuEvent_GpuEventInfo_MALI_CSF_RESET_FAILED}};
+                                                 GpuEvent_GpuEventInfo_MALI_CSF_RESET_FAILED},
+                    {"TILER_OOM",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_TILER_OOM},
+                    {"PROGRESS_TIMER",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_PROGRESS_TIMER},
+                    {"CS_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_CS_ERROR},
+                    {"FW_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_FW_ERROR},
+                    {"PMODE_EXIT_TIMEOUT", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                   GpuEvent_GpuEventInfo_MALI_PMODE_EXIT_TIMEOUT},
+                    {"PMODE_ENTRY_FAILURE", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                    GpuEvent_GpuEventInfo_MALI_PMODE_ENTRY_FAILURE},
+                    {"GPU_PAGE_FAULT",
+                     PixelAtoms::GpuEvent::GpuEventInfo::GpuEvent_GpuEventInfo_MALI_GPU_PAGE_FAULT},
+                    {"MMU_AS_ACTIVE_STUCK",
+                     PixelAtoms::GpuEvent::GpuEventInfo::
+                             GpuEvent_GpuEventInfo_MALI_MMU_AS_ACTIVE_STUCK}};
+
+    const std::unordered_map<std::string,
+                             PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType>
+            kThermalAbnormalityTypeStrToEnum{
+                    {"UNKNOWN", PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                                        ThermalSensorAbnormalityDetected_AbnormalityType_UNKNOWN},
+                    {"SENSOR_STUCK",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_SENSOR_STUCK},
+                    {"EXTREME_HIGH_TEMP",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_EXTREME_HIGH_TEMP},
+                    {"EXTREME_LOW_TEMP",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_EXTREME_LOW_TEMP},
+                    {"HIGH_RISING_SPEED",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_HIGH_RISING_SPEED},
+                    {"TEMP_READ_FAIL",
+                     PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType::
+                             ThermalSensorAbnormalityDetected_AbnormalityType_TEMP_READ_FAIL},
+            };
 
     BatteryCapacityReporter battery_capacity_reporter_;
     ChargeStatsReporter charge_stats_reporter_;
+    BatteryFGReporter battery_fg_reporter_;
 
     // Proto messages are 1-indexed and VendorAtom field numbers start at 2, so
     // store everything in the values array at the index of the field number

@@ -210,12 +210,11 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
             ALOGE("Invalid ff_effect");
             return false;
         }
-        if (((*effect).replay.length != timeoutMs) || (ioctl(mInputFd, EVIOCSFF, effect) < 0)) {
+        if (ioctl(mInputFd, EVIOCSFF, effect) < 0) {
             ALOGE("setFFEffect fail");
             return false;
         }
-        HWAPI_RECORD(StringPrintf("#%d: %dms", (*effect).id, (*effect).replay.length),
-                     &mInputIoStream);
+        HWAPI_RECORD(StringPrintf("#%d: %dms", (*effect).id, timeoutMs), &mInputIoStream);
         return true;
     }
     bool setFFPlay(int8_t index, bool value) override {
@@ -296,6 +295,9 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         HWAPI_RECORD(std::string("pcm_close"), &mPcmStream);
         *haptic_pcm = NULL;
         return false;
+    }
+    bool isPassthroughI2sHapticSupported() override {
+        return utils::getProperty("ro.vendor.vibrator.hal.passthrough_i2s_supported", false);
     }
     bool uploadOwtEffect(const uint8_t *owtData, const uint32_t numBytes, struct ff_effect *effect,
                          uint32_t *outEffectIndex, int *status) override {
@@ -516,9 +518,7 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
         return true;
     }
     bool isChirpEnabled() override {
-        bool value;
-        getProperty("chirp.enabled", &value, false);
-        return value;
+        return utils::getProperty("persist.vendor.vibrator.hal.chirp.enabled", false);
     }
     bool getSupportedPrimitives(uint32_t *value) override {
         return getProperty("supported_primitives", value, (uint32_t)0);

@@ -16,8 +16,8 @@ on init
     # memory reserve tuning
     write /proc/sys/vm/min_free_kbytes 27386
     write /proc/sys/vm/lowmem_reserve_ratio "0 0 0"
-    # khugepaged tuning
-    write /sys/kernel/mm/transparent_hugepage/khugepaged/scan_sleep_millisecs 60000
+    # disable khugepaged
+    write /sys/kernel/mm/transparent_hugepage/enabled "never"
 
 # Property from experiments - server config
 on property:persist.device_config.vendor_system_native_boot.zram_size=*
@@ -50,6 +50,10 @@ on property:sys.boot_completed=1
     write /sys/kernel/tracing/instances/pixel/events/chunk_heap/enable 1
     write /sys/kernel/tracing/instances/pixel/events/dmabuf_heap/dma_buf_release/enable 1
     write /sys/kernel/tracing/instances/pixel/events/trusty/trusty_dma_buf_put/enable 1
+
+    # Allow max_usage_kb to be reset by system processes
+    chown system system /sys/kernel/vendor_mm/gcma_heap/trusty:faceauth_rawimage_heap/max_usage_kb
+    chmod 0660 /sys/kernel/vendor_mm/gcma_heap/trusty:faceauth_rawimage_heap/max_usage_kb
 
 # turns off tracing right before bugreporting to keep more traces
 on property:init.svc.dumpstatez=running

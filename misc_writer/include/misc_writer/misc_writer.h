@@ -40,12 +40,18 @@ enum class MiscWriterActions : int32_t {
   kWriteTimeOffset,
   kSetMaxRamSize,
   kClearMaxRamSize,
+  kWriteTimeRtcOffset,
+  kWriteTimeMinRtc,
+  kSetSotaConfig,
+  kWriteDstTransition,
+  kWriteDstOffset,
 
   kUnset = -1,
 };
 
 class MiscWriter {
  public:
+  // sync with bootloader's abl bootloader_message.h
   static constexpr uint32_t kThemeFlagOffsetInVendorSpace = 0;
   static constexpr char kDarkThemeFlag[] = "theme-dark";
   static constexpr uint32_t kSotaFlagOffsetInVendorSpace = 32;
@@ -62,6 +68,17 @@ class MiscWriter {
   static constexpr uint32_t kMaxRamSizeOffsetInVendorSpace = 192;
   static constexpr char kMaxRamSize[] = "max-ram-size=";
   static constexpr uint32_t kSotaStateOffsetInVendorSpace = 224;
+  static constexpr uint32_t kRTimeRtcOffsetValOffsetInVendorSpace = 264;
+  static constexpr char kTimeRtcOffset[] = "timertcoffset=";
+  static constexpr uint32_t kRTimeMinRtcValOffsetInVendorSpace = 296;
+  static constexpr char kTimeMinRtc[] = "timeminrtc=";
+  static constexpr uint32_t kFaceauthEvalValOffsetInVendorSpace = 328;
+  static constexpr uint32_t kSotaScheduleShipmodeOffsetInVendorSpace = 360;
+  static constexpr uint32_t kDstTransitionOffsetInVendorSpace = 392;
+  static constexpr char kDstTransition[] = "dst-transition=";
+  static constexpr uint32_t kDstOffsetOffsetInVendorSpace = 424;
+  static constexpr char kDstOffset[] = "dst-offset=";
+  // Next available space = 456
 
   // Minimum and maximum valid value for max-ram-size
   static constexpr int32_t kRamSizeDefault = -1;

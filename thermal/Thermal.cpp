@@ -241,6 +241,72 @@ void Thermal::sendThermalChangedCallback(const Temperature &t) {
                      callbacks_.end());
 }
 
+ndk::ScopedAStatus Thermal::registerCoolingDeviceChangedCallbackWithType(
+        const std::shared_ptr<ICoolingDeviceChangedCallback> &callback, CoolingType type) {
+    ATRACE_CALL();
+
+    if (callback == nullptr) {
+        return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
+                                                                "Invalid nullptr callback");
+    }
+
+    if (!thermal_helper_->isInitializedOk()) {
+        return initErrorStatus();
+    }
+
+    std::lock_guard<std::mutex> _lock(cdev_callback_mutex_);
+    if (std::any_of(cdev_callbacks_.begin(), cdev_callbacks_.end(),
+                    [&](const CoolingDeviceCallbackSetting &c) {
+                        return interfacesEqual(c.callback, callback);
+                    })) {
+        return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
+                                                                "Callback already registered");
+    }
+    cdev_callbacks_.emplace_back(callback, true, type);
+
+    // b/315858553 to develope the callback
+    LOG(INFO) << __func__ << ":" << toString(type) << " is under development";
+
+    return ndk::ScopedAStatus::ok();
+}
+
+ndk::ScopedAStatus Thermal::unregisterCoolingDeviceChangedCallback(
+        const std::shared_ptr<ICoolingDeviceChangedCallback> &callback) {
+    ATRACE_CALL();
+
+    if (callback == nullptr) {
+        return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
+                                                                "Invalid nullptr callback");
+    }
+
+    bool removed = false;
+    std::lock_guard<std::mutex> _lock(cdev_callback_mutex_);
+    cdev_callbacks_.erase(
+            std::remove_if(
+                    cdev_callbacks_.begin(), cdev_callbacks_.end(),
+                    [&](const CoolingDeviceCallbackSetting &c) {
+                        if (interfacesEqual(c.callback, callback)) {
+                            LOG(INFO)
+                                    << "a callback has been unregistered to ThermalHAL, isFilter: "
+                                    << c.is_filter_type << " Type: " << toString(c.type);
+                            removed = true;
+                            return true;
+                        }
+                        return false;
+                    }),
+            cdev_callbacks_.end());
+
+    if (!removed) {
+        return ndk::ScopedAStatus::fromExceptionCodeWithMessage(EX_ILLEGAL_ARGUMENT,
+                                                                "Callback wasn't registered");
+    }
+
+    // b/315858553 to develope the callback
+    LOG(INFO) << __func__ << " is under development";
+
+    return ndk::ScopedAStatus::ok();
+}
+
 void Thermal::dumpVirtualSensorInfo(std::ostringstream *dump_buf) {
     *dump_buf << "getVirtualSensorInfo:" << std::endl;
     const auto &map = thermal_helper_->GetSensorInfoMap();
@@ -646,15 +712,17 @@ void Thermal::dumpThermalData(int fd) {
             }
         }
         {
-            dump_buf << "getEmulTemperatures:" << std::endl;
+            dump_buf << "getEmulSettings:" << std::endl;
             for (const auto &sensor_status_pair : sensor_status_map) {
-                if (sensor_status_pair.second.emul_setting == nullptr) {
+                if (sensor_status_pair.second.override_status.emul_temp == nullptr) {
                     continue;
                 }
-                dump_buf << " Name: " << sensor_status_pair.first
-                         << " EmulTemp: " << sensor_status_pair.second.emul_setting->emul_temp
+                dump_buf << " Name: " << sensor_status_pair.first << " EmulTemp: "
+                         << sensor_status_pair.second.override_status.emul_temp->temp
                          << " EmulSeverity: "
-                         << sensor_status_pair.second.emul_setting->emul_severity << std::endl;
+                         << sensor_status_pair.second.override_status.emul_temp->severity
+                         << " maxThrottling: " << std::boolalpha
+                         << sensor_status_pair.second.override_status.max_throttling << std::endl;
             }
         }
         {
@@ -774,17 +842,18 @@ binder_status_t Thermal::dump(int fd, const char **args, uint32_t numArgs) {
         return STATUS_OK;
     }
 
-    if (std::string(args[0]) == "emul_temp") {
-        return (numArgs != 3 ||
-                !thermal_helper_->emulTemp(std::string(args[1]), std::strtod(args[2], nullptr)))
-                       ? STATUS_BAD_VALUE
-                       : STATUS_OK;
-    } else if (std::string(args[0]) == "emul_severity") {
-        return (numArgs != 3 ||
-                !thermal_helper_->emulSeverity(std::string(args[1]),
-                                               static_cast<int>(std::strtol(args[2], nullptr, 10))))
-                       ? STATUS_BAD_VALUE
-                       : STATUS_OK;
+    if (std::string(args[0]) == "emul_temp" && numArgs >= 3) {
+        return thermal_helper_->emulTemp(
+                       std::string(args[1]), std::atof(args[2]),
+                       numArgs == 3 ? false : std::string(args[3]) == "max_throttling")
+                       ? STATUS_OK
+                       : STATUS_BAD_VALUE;
+    } else if (std::string(args[0]) == "emul_severity" && numArgs >= 3) {
+        return thermal_helper_->emulSeverity(
+                       std::string(args[1]), std::atof(args[2]),
+                       numArgs == 3 ? false : std::string(args[3]) == "max_throttling")
+                       ? STATUS_OK
+                       : STATUS_BAD_VALUE;
     } else if (std::string(args[0]) == "emul_clear") {
         return (numArgs != 2 || !thermal_helper_->emulClear(std::string(args[1])))
                        ? STATUS_BAD_VALUE

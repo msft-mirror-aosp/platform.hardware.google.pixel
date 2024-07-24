@@ -112,6 +112,14 @@ message Atom {
       VendorAudioAdaptedInfoStatsReported vendor_audio_adapted_info_stats_reported = 105058;
       GpuEvent gpu_event = 105059;
       VendorAudioPcmStatsReported vendor_audio_pcm_stats_reported = 105060;
+      VendorUsbDataSessionEvent vendor_usb_data_session_event = 105061;
+      ThermalSensorAbnormalityDetected thermal_sensor_abnormality_detected = 105062;
+      VendorAudioOffloadedEffectStatsReported vendor_audio_offloaded_effect_stats_reported = 105063;
+      VendorAudioBtMediaStatsReported vendor_audio_bt_media_stats_reported = 105064;
+      PixelImpulseUsageReported pixel_impulse_usage_reported = 105065;
+      DisplayPortErrorStats display_port_error_stats = 105066;
+      HDCPAuthTypeStats hdcp_auth_type_stats = 105067;
+      DisplayPortUsage display_port_usage = 105068;
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -612,6 +620,10 @@ message PixelMmMetricsPerHour {
     optional int32 psi_mem_some_avg300_min = 58;
     optional int32 psi_mem_some_avg300_max = 59;
     optional int32 psi_mem_some_avg300_avg = 60;
+    optional int32 version = 61 [deprecated = true];
+    optional int64 shmem_pages = 62;
+    optional int64 page_tables_pages = 63;
+    optional int64 dmabuf_pages = 64;
 }
 
 /* A message containing Pixel memory metrics collected daily. */
@@ -675,6 +687,11 @@ message PixelMmMetricsPerDay {
     optional int64 thp_split_page = 57;
     optional int64 thp_migration_split = 58;
     optional int64 thp_deferred_split_page = 59;
+    optional int64 version = 60 [deprecated = true];
+    optional int64 cpu_total_time = 61;
+    optional int64 cpu_idle_time = 62;
+    optional int64 cpu_io_wait_time = 63;
+    optional int64 kswapd_pageout_run = 64;
 }
 
 /* A message containing CMA metrics collected from dogfooding only. */
@@ -1514,6 +1531,7 @@ message BrownoutDetected {
         SMPL_WARN = 1;
         UVLO2 = 2;
         BATOILO = 3;
+        BATOILO2 = 4;
     }
 
     enum BrownoutReason {
@@ -1546,6 +1564,7 @@ message BrownoutDetected {
         OCP_BBS = 26;
         OCP_BCS = 27;
         OCP_BDS = 28;
+        OCP2_IF = 29;
     }
 
     // Reverse domain name. (e.g. Pixel)
@@ -1821,6 +1840,14 @@ message GpuEvent {
       MALI_PM_TIMEOUT = 13;
       MALI_CSF_RESET_OK = 14;
       MALI_CSF_RESET_FAILED = 15;
+      MALI_TILER_OOM = 16;
+      MALI_PROGRESS_TIMER = 17;
+      MALI_CS_ERROR = 18;
+      MALI_FW_ERROR = 19;
+      MALI_PMODE_EXIT_TIMEOUT = 20;
+      MALI_PMODE_ENTRY_FAILURE = 21;
+      MALI_GPU_PAGE_FAULT = 22;
+      MALI_MMU_AS_ACTIVE_STUCK = 23;
     }
 
     /* Vendor reverse domain name (expecting "com.google.pixel"). */
@@ -1989,4 +2016,236 @@ message VendorAudioPcmStatsReported {
   optional int32 pcm_open_latency_avg_ms_per_day = 3;
   /* Total active count of the pcm type per day. */
   optional int32 pcm_active_counts_per_day = 4;
+}
+
+/**
+  * Keep track of information about a USB data session, which is defined
+  * as the period when a port enters a data role (either host or device) to
+  * when the port exits the data role.
+  */
+message VendorUsbDataSessionEvent {
+  /* Vendor reverse domain name (expecting "com.google.pixel") */
+  optional string reverse_domain_name = 1;
+
+  enum UsbDataRole {
+    USB_ROLE_UNKNOWN = 0;
+    USB_ROLE_DEVICE = 1;
+    USB_ROLE_HOST = 2;
+  }
+  /**
+    * USB device states are key milestones in a USB connection.
+    * For device data role, a typical transition would be like:
+    * not attached -> default -> addressed -> configured.
+    * For host data role, a typical transition would be like
+    * not attached -> powered -> default -> addressed -> configured.
+    */
+  enum UsbDeviceState {
+    USB_STATE_UNKNOWN = 0;
+    USB_STATE_NOT_ATTACHED = 1;
+    USB_STATE_ATTACHED = 2;
+    USB_STATE_POWERED = 3;
+    USB_STATE_DEFAULT = 4;
+    USB_STATE_ADDRESSED = 5;
+    USB_STATE_CONFIGURED = 6;
+    USB_STATE_SUSPENDED = 7;
+  }
+  /* USB data role of the data session. */
+  optional UsbDataRole usb_role = 2;
+  /* Usb device state transitions during the data session. */
+  repeated UsbDeviceState usb_states = 3;
+  /**
+    * Elapsed time from the start of the data session when entering the
+    * state, mapped 1-1 to the usb_states field.
+    */
+  repeated int64 elapsed_time_ms = 4;
+  // Duration of the data session.
+  optional int64 duration_ms = 5;
+}
+
+/*
+ * Logs the thermal sensor abnormal event when detected.
+ * Logged from:
+ *    virtual sensors: hardware/google/pixel/thermal/utils/thermal_stats_helper.cpp
+ *    thermistors & SoC: hardware/google/pixel/pixelstats/UeventListener.cpp
+ */
+message ThermalSensorAbnormalityDetected {
+  enum AbnormalityType {
+    UNKNOWN = 0;
+    SENSOR_STUCK = 1;
+    EXTREME_HIGH_TEMP = 2;
+    EXTREME_LOW_TEMP = 3;
+    HIGH_RISING_SPEED = 4;
+    TEMP_READ_FAIL = 5;
+  }
+
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  /* Type of Thermal Sensor Abnormality */
+  optional AbnormalityType type = 2;
+  /* Name of the problematic sensor */
+  optional string sensor = 3;
+  /* Abnormal temp reading of sensor */
+  optional int32 temp = 4;
+}
+
+/**
+ * Logs the reported vendor audio offloaded effects usage stats.
+ */
+message VendorAudioOffloadedEffectStatsReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* UUID most significant bit */
+  optional int64 effect_uuid_msb = 2;
+
+  /* UUID least significant bit */
+  optional int64 effect_uuid_lsb = 3;
+
+  /* Active seconds per day. */
+  optional int32 effect_active_seconds_per_day = 4;
+}
+
+/*
+ * Logs the Bluetooth Audio stats.
+ * Two stats are recorded, count and duration (in ms) per features.
+ */
+message VendorAudioBtMediaStatsReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  enum Codec {
+    UNKNOWN = 0;
+    SBC = 1;
+    AAC = 2;
+    OPUS = 3;
+    LC3 = 4;
+  }
+  /* Codec to record. */
+  optional Codec bt_codec_type = 2;
+  /* Total active seconds to record. */
+  optional int32 active_seconds_per_day = 3;
+}
+
+/*
+ * Logs the usage of APIs in Pixel Impulse.
+ */
+message PixelImpulseUsageReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* UID of the caller package */
+  optional int32 caller_uid = 2 [(android.os.statsd.is_uid) = true];
+
+  /* UID of the callee package */
+  optional int32 callee_uid = 3 [(android.os.statsd.is_uid) = true];
+
+  enum ApiName {
+      API_UNKNOWN = 0;
+      /* Server side */
+      API_SERVICE_BIND = 1;
+      API_SERVICE_UNBIND = 2;
+      API_REGISTER = 3;
+      API_UNREGISTER = 4;
+      API_CLEAR_APP_DATA = 100;
+      /* Client side */
+      API_SERVER_START = 1001;
+      API_PIXEL_STATE_CHANGE = 1002;
+  }
+  /* Invoked API name */
+  optional ApiName api_name = 4;
+
+  enum Tag {
+      TAG_UNKNOWN = 0;
+  }
+  /* Tag for debugging purpose */
+  optional Tag tag = 5;
+
+  /* Timestamp of the usage start in epoch time */
+  optional int64 usage_start_epoch_millis = 6;
+
+  /* Timestamp of the usage start since device boot */
+  optional int64 usage_start_uptime_millis = 7;
+
+  /* Duration of the usage */
+  optional int64 usage_duration_millis = 8;
+
+  /* Whether the invocation was successful */
+  optional bool success = 9;
+
+  enum FailReason {
+      FAIL_REASON_UNKNOWN = 0;
+      FAIL_REASON_INVALID_ARGUMENT = 1;
+      FAIL_REASON_UNAUTHORIZED = 2;
+      FAIL_REASON_TIMEOUT = 3;
+      FAIL_REASON_NOT_FOUND = 4;
+      FAIL_REASON_INVALID_STATE = 5;
+  }
+  /* Fail reason (if success == false) */
+  optional FailReason fail_reason = 10;
+
+  /* Size of the arguments */
+  optional int32 request_size = 11;
+}
+
+/**
+ * Log DisplayPort link error statistics.
+ */
+message DisplayPortErrorStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* The error count due to link training failed. */
+  optional int32 link_negotiation_failures = 2;
+  /* The error count due to read EDID failed. */
+  optional int32 edid_read_failures = 3;
+  /* The error count due to read dpcd failed. */
+  optional int32 dpcd_read_failures = 4;
+  /* The error count due to EDID is invalid. */
+  optional int32 edid_invalid_failures = 5;
+  /* The error count due to sink count is invalid. */
+  optional int32 sink_count_invalid_failures = 6;
+  /* The error count due to link unstable. */
+  optional int32 link_unstable_failures = 7;
+}
+
+/**
+ * Log HDCP authentication type statistics.
+ */
+message HDCPAuthTypeStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* The count due to hdcp2 success */
+  optional int32 hdcp2_success_count = 2;
+  /* The count due to hdcp2 fallback */
+  optional int32 hdcp2_fallback_count = 3;
+  /* The count due to hdcp2 fail */
+  optional int32 hdcp2_fail_count = 4;
+  /* The count due to hdcp1 success */
+  optional int32 hdcp1_success_count = 5;
+  /* The count due to hdcp1 fail */
+  optional int32 hdcp1_fail_count = 6;
+  /* The count due to hdcp0 */
+  optional int32 hdcp0_count = 7;
+}
+
+/**
+ * A message containing how DisplayPort is being used in a day.
+ */
+message DisplayPortUsage {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* resolution width */
+  optional int32 width = 2;
+  /* resolution height */
+  optional int32 height = 3;
+  /* refresh rate */
+  optional float refresh_rate = 4;
+  /* vendor ID. */
+  optional int32 vendor_id = 5;
+  /* product ID. */
+  optional int32 product_id = 6;
+  /* indicated start/stop event of DP usage */
+  optional bool connected = 7;
 }

@@ -45,6 +45,7 @@
 #include <cutils/uevent.h>
 #include <fcntl.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
+#include <linux/thermal.h>
 #include <log/log.h>
 #include <pixelstats/StatsHelper.h>
 #include <pixelstats/UeventListener.h>
@@ -68,6 +69,7 @@ using android::base::ReadFileToString;
 using android::base::WriteStringToFile;
 using android::hardware::google::pixel::PixelAtoms::GpuEvent;
 using android::hardware::google::pixel::PixelAtoms::PdVidPid;
+using android::hardware::google::pixel::PixelAtoms::ThermalSensorAbnormalityDetected;
 using android::hardware::google::pixel::PixelAtoms::VendorHardwareFailed;
 using android::hardware::google::pixel::PixelAtoms::VendorUsbPortOverheat;
 
@@ -80,6 +82,8 @@ constexpr int32_t VID_GOOGLE = 0x18d1;
 constexpr int32_t PID_OFFSET = 2;
 constexpr int32_t PID_LENGTH = 4;
 constexpr uint32_t PID_P30 = 0x4f05;
+constexpr const char *THERMAL_ABNORMAL_INFO_EQ = "THERMAL_ABNORMAL_INFO=";
+constexpr const char *THERMAL_ABNORMAL_TYPE_EQ = "THERMAL_ABNORMAL_TYPE=";
 
 bool UeventListener::ReadFileToInt(const std::string &path, int *val) {
     return ReadFileToInt(path.c_str(), val);
@@ -182,6 +186,17 @@ void UeventListener::ReportChargeMetricsEvent(const std::shared_ptr<IStats> &sta
     }
 
     charge_stats_reporter_.checkAndReport(stats_client, kChargeMetricsPath);
+}
+
+void UeventListener::ReportFGMetricsEvent(const std::shared_ptr<IStats> &stats_client,
+                                              const char *driver) {
+    if (!driver || (strcmp(driver, "DRIVER=max77779-fg") && strcmp(driver, "DRIVER=maxfg") &&
+        strcmp(driver, "DRIVER=max1720x")))
+        return;
+
+    battery_fg_reporter_.checkAndReportFGLearning(stats_client, kFGLearningPath);
+    battery_fg_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath);
+    battery_fg_reporter_.checkAndReportFGModelLoading(stats_client, kFGModelLoadingPath);
 }
 
 /**
@@ -300,6 +315,87 @@ void UeventListener::ReportGpuEvent(const std::shared_ptr<IStats> &stats_client,
         ALOGE("Unable to report GPU event.");
 }
 
+/**
+ * Report thermal abnormal event.
+ * The data is sent as uevent environment parameters:
+ *      1. THERMAL_ABNORMAL_TYPE={type}
+ *      2. THERMAL_ABNORMAL_INFO=Name:{name},Val:{val}
+ * This atom logs data in 3 potential events:
+ *      1. thermistor or tj temperature reading stuck
+ *      2. thermistor or tj showing very high temperature reading
+ *      3. thermistor or tj showing very low temperature reading
+ */
+void UeventListener::ReportThermalAbnormalEvent(const std::shared_ptr<IStats> &stats_client,
+                                                const char *devpath,
+                                                const char *thermal_abnormal_event_type,
+                                                const char *thermal_abnormal_event_info) {
+    if (!stats_client || !devpath ||
+        strncmp(devpath, "DEVPATH=/module/pixel_metrics",
+                strlen("DEVPATH=/module/pixel_metrics")) ||
+        !thermal_abnormal_event_type || !thermal_abnormal_event_info)
+        return;
+    ALOGD("Thermal Abnormal Type: %s, Thermal Abnormal Info: %s", thermal_abnormal_event_type,
+          thermal_abnormal_event_info);
+    std::vector<std::string> type_msg = android::base::Split(thermal_abnormal_event_type, "=");
+    std::vector<std::string> info_msg = android::base::Split(thermal_abnormal_event_info, "=");
+    if (type_msg.size() != 2 || info_msg.size() != 2) {
+        ALOGE("Invalid msg size for thermal abnormal with type(%zu) and info(%zu)", type_msg.size(),
+              info_msg.size());
+        return;
+    }
+
+    if (type_msg[0] != "THERMAL_ABNORMAL_TYPE" || info_msg[0] != "THERMAL_ABNORMAL_INFO") {
+        ALOGE("Invalid msg prefix for thermal abnormal with type(%s) and info(%s)",
+              type_msg[0].c_str(), info_msg[0].c_str());
+        return;
+    }
+
+    auto abnormality_type = kThermalAbnormalityTypeStrToEnum.find(type_msg[1]);
+    if (abnormality_type == kThermalAbnormalityTypeStrToEnum.end()) {
+        ALOGE("Unknown thermal abnormal event type %s", type_msg[1].c_str());
+        return;
+    }
+
+    std::vector<std::string> info_list = android::base::Split(info_msg[1], ",");
+    if (info_list.size() != 2) {
+        ALOGE("Thermal abnormal info(%s) split size %zu != 2", info_msg[1].c_str(),
+              info_list.size());
+        return;
+    }
+
+    const auto &name_msg = info_list[0], val_msg = info_list[1];
+    if (!android::base::StartsWith(name_msg, "name:") ||
+        !android::base::StartsWith(val_msg, "val:")) {
+        ALOGE("Invalid prefix for thermal abnormal info name(%s), val(%s)", name_msg.c_str(),
+              val_msg.c_str());
+        return;
+    }
+
+    auto name_start_pos = std::strlen("name:");
+    auto name = name_msg.substr(name_start_pos);
+    if (name.length() > THERMAL_NAME_LENGTH) {
+        ALOGE("Invalid sensor name %s with length %zu > %d", name.c_str(), name.length(),
+              THERMAL_NAME_LENGTH);
+        return;
+    }
+
+    auto val_start_pos = std::strlen("val:");
+    auto val_str = val_msg.substr(val_start_pos);
+    int val;
+    if (sscanf(val_str.c_str(), "%d", &val) != 1) {
+        ALOGE("Invalid value for thermal abnormal info: %s", val_str.c_str());
+        return;
+    }
+    ALOGI("Reporting Thermal Abnormal event of type: %s(%d) for %s with val: %d",
+          abnormality_type->first.c_str(), abnormality_type->second, name.c_str(), val);
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kThermalSensorAbnormalityDetected,
+                        .values = {abnormality_type->second, name, val}};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk())
+        ALOGE("Unable to report Thermal Abnormal event.");
+}
+
 bool UeventListener::ProcessUevent() {
     char msg[UEVENT_MSG_LEN + 2];
     char *cp;
@@ -308,6 +404,7 @@ bool UeventListener::ProcessUevent() {
     const char *devpath;
     bool collect_partner_id = false;
     const char *gpu_event_type = nullptr, *gpu_event_info = nullptr;
+    const char *thermal_abnormal_event_type = nullptr, *thermal_abnormal_event_info = nullptr;
     int n;
 
     if (uevent_fd_ < 0) {
@@ -367,6 +464,10 @@ bool UeventListener::ProcessUevent() {
             gpu_event_type = cp;
         } else if (!strncmp(cp, "GPU_UEVENT_INFO=", strlen("GPU_UEVENT_INFO="))) {
             gpu_event_info = cp;
+        } else if (!strncmp(cp, THERMAL_ABNORMAL_TYPE_EQ, strlen(THERMAL_ABNORMAL_TYPE_EQ))) {
+            thermal_abnormal_event_type = cp;
+        } else if (!strncmp(cp, THERMAL_ABNORMAL_INFO_EQ, strlen(THERMAL_ABNORMAL_INFO_EQ))) {
+            thermal_abnormal_event_info = cp;
         }
         /* advance to after the next \0 */
         while (*cp++) {
@@ -387,6 +488,9 @@ bool UeventListener::ProcessUevent() {
             ReportTypeCPartnerId(stats_client);
         }
         ReportGpuEvent(stats_client, driver, gpu_event_type, gpu_event_info);
+        ReportThermalAbnormalEvent(stats_client, devpath, thermal_abnormal_event_type,
+                                   thermal_abnormal_event_info);
+        ReportFGMetricsEvent(stats_client, driver);
     }
 
     if (log_fd_ > 0) {
@@ -399,7 +503,10 @@ UeventListener::UeventListener(const std::string audio_uevent, const std::string
                                const std::string overheat_path,
                                const std::string charge_metrics_path,
                                const std::string typec_partner_vid_path,
-                               const std::string typec_partner_pid_path)
+                               const std::string typec_partner_pid_path,
+                               const std::vector<std::string> fg_learning_path,
+                               const std::string fw_update_path,
+                               const std::vector<std::string> fg_modelloading_path)
     : kAudioUevent(audio_uevent),
       kBatterySSOCPath(ssoc_details_path),
       kUsbPortOverheatPath(overheat_path),
@@ -407,6 +514,9 @@ UeventListener::UeventListener(const std::string audio_uevent, const std::string
       kTypeCPartnerUevent(typec_partner_uevent_default),
       kTypeCPartnerVidPath(typec_partner_vid_path),
       kTypeCPartnerPidPath(typec_partner_pid_path),
+      kFGLearningPath(fg_learning_path),
+      kFwUpdatePath(fw_update_path),
+      kFGModelLoadingPath(fg_modelloading_path),
       uevent_fd_(-1),
       log_fd_(-1) {}
 
@@ -428,6 +538,10 @@ UeventListener::UeventListener(const struct UeventPaths &uevents_paths)
       kTypeCPartnerPidPath((uevents_paths.TypeCPartnerPidPath == nullptr)
                                    ? typec_partner_pid_path_default
                                    : uevents_paths.TypeCPartnerPidPath),
+      kFGLearningPath(uevents_paths.FGLearningPath),
+      kFwUpdatePath((uevents_paths.FwUpdatePath == nullptr)
+                                   ? "" : uevents_paths.FwUpdatePath),
+      kFGModelLoadingPath(uevents_paths.FGModelLoadingPath),
       uevent_fd_(-1),
       log_fd_(-1) {}
 
