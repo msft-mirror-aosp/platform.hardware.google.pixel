@@ -25,7 +25,7 @@ option java_package = "android.hardware.google.pixel";
 option java_outer_classname = "PixelAtoms";
 
 import "frameworks/proto_logging/stats/atom_field_options.proto";
-import "frameworks/proto_logging/stats/enums/app/app_enums.proto";
+import "frameworks/proto_logging/stats/enums/app_shared/app_enums.proto";
 
 /*
  * Please note that the following features are not currently supported by
@@ -91,7 +91,7 @@ message Atom {
       BatteryHealthUsage battery_health_usage = 105038;
       F2fsSmartIdleMaintEnabledStateChanged f2fs_smart_idle_maint_enabled_state_changed = 105039;
       BlockStatsReported block_stats_reported = 105040;
-      VendorAudioHardwareStatsReported vendor_audio_hardware_stats_reported = 105041;
+      VendorAudioHardwareStatsReported vendor_audio_hardware_stats_reported = 105041 [(android.os.statsd.module) = "pixelaudio"];
 
       ThermalDfsStats thermal_dfs_stats = 105042;
       VendorLongIRQStatsReported vendor_long_irq_stats_reported = 105043;
@@ -1383,6 +1383,9 @@ message VendorAudioHardwareStatsReported {
 
   /* cca_enable: UI enable & algorithm is inactive (C2 or C4) */
   optional int32 cca_enable_count_per_day = 8;
+
+  /* version: version of the data. */
+  optional int32 version = 9;
 }
 
 /**
@@ -2209,6 +2212,7 @@ message PixelImpulseUsageReported {
   enum Tag {
       TAG_UNKNOWN = 0;
       TAG_TEMPERATURE_READ_DELAY = 1;
+      TAG_SKIN_TEMPERATURE = 2;
   }
   /* Tag for debugging purpose */
   optional Tag tag = 5;
@@ -2266,6 +2270,12 @@ message PixelImpulseUsageReported {
    */
   /* Used when state_source == STATE_SOURCE_UID_IMPORTANCE */
   optional android.app.Importance uid_importance_cut_point = 15;
+
+  /* Expected value for temperature delta in Celsius */
+  optional float expected_temperature_celsius = 16;
+
+  /* Actual value for temperature delta in Celsius */
+  optional float actual_temperature_celsius = 17;
 }
 
 /**
