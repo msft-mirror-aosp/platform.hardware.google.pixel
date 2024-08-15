@@ -25,7 +25,7 @@ option java_package = "android.hardware.google.pixel";
 option java_outer_classname = "PixelAtoms";
 
 import "frameworks/proto_logging/stats/atom_field_options.proto";
-import "frameworks/proto_logging/stats/enums/app/enums.proto";
+import "frameworks/proto_logging/stats/enums/app_shared/app_enums.proto";
 
 /*
  * Please note that the following features are not currently supported by
@@ -74,7 +74,7 @@ message Atom {
 
       CitadelVersion citadel_version = 100018; // moved from vendor proprietary
       CitadelEvent citadel_event = 100019;  // moved from vendor proprietary
-      VendorSpeakerStatsReported vendor_speaker_stats_reported = 105030;
+      VendorSpeakerStatsReported vendor_speaker_stats_reported = 105030 [(android.os.statsd.module) = "pixelaudio"];
 
       ChreHalNanoappLoadFailed chre_hal_nanoapp_load_failed =
                 105031 [(android.os.statsd.module) = "chre"];
@@ -91,7 +91,7 @@ message Atom {
       BatteryHealthUsage battery_health_usage = 105038;
       F2fsSmartIdleMaintEnabledStateChanged f2fs_smart_idle_maint_enabled_state_changed = 105039;
       BlockStatsReported block_stats_reported = 105040;
-      VendorAudioHardwareStatsReported vendor_audio_hardware_stats_reported = 105041;
+      VendorAudioHardwareStatsReported vendor_audio_hardware_stats_reported = 105041 [(android.os.statsd.module) = "pixelaudio"];
 
       ThermalDfsStats thermal_dfs_stats = 105042;
       VendorLongIRQStatsReported vendor_long_irq_stats_reported = 105043;
@@ -101,30 +101,42 @@ message Atom {
       PcieLinkStatsReported pcie_link_stats = 105047;
       VendorSensorCoolingDeviceStats vendor_sensor_cooling_device_stats = 105048;
 
-      VibratorPlaycountReported vibrator_playcount_reported = 105049;
-      VibratorLatencyReported vibrator_latency_reported = 105050;
-      VibratorErrorsReported vibrator_errors_reported = 105051;
+      VibratorPlaycountReported vibrator_playcount_reported = 105049 [(android.os.statsd.module) = "vibrator"];
+      VibratorLatencyReported vibrator_latency_reported = 105050 [(android.os.statsd.module) = "vibrator"];
+      VibratorErrorsReported vibrator_errors_reported = 105051 [(android.os.statsd.module) = "vibrator"];
       F2fsAtomicWriteInfo f2fs_atomic_write_info = 105052;
       PartitionsUsedSpaceReported partition_used_space_reported = 105053;
       PowerMitigationDurationCounts mitigation_duration = 105054; // moved from atoms.proto
       DisplayPanelErrorStats display_panel_error_stats = 105055;
       VendorAudioPdmStatsReported vendor_audio_pdm_stats_reported = 105056;
-      VendorAudioThirdPartyEffectStatsReported vendor_audio_third_party_effect_stats_reported = 105057;
+      VendorAudioThirdPartyEffectStatsReported vendor_audio_third_party_effect_stats_reported = 105057 [(android.os.statsd.module) = "pixelaudio"];
       VendorAudioAdaptedInfoStatsReported vendor_audio_adapted_info_stats_reported = 105058;
       GpuEvent gpu_event = 105059;
-      VendorAudioPcmStatsReported vendor_audio_pcm_stats_reported = 105060;
+      VendorAudioPcmStatsReported vendor_audio_pcm_stats_reported = 105060 [(android.os.statsd.module) = "pixelaudio"];
       VendorUsbDataSessionEvent vendor_usb_data_session_event = 105061;
       ThermalSensorAbnormalityDetected thermal_sensor_abnormality_detected = 105062;
       VendorAudioOffloadedEffectStatsReported vendor_audio_offloaded_effect_stats_reported = 105063;
-      VendorAudioBtMediaStatsReported vendor_audio_bt_media_stats_reported = 105064;
+      VendorAudioBtMediaStatsReported vendor_audio_bt_media_stats_reported = 105064 [(android.os.statsd.module) = "pixelaudio"];
       PixelImpulseUsageReported pixel_impulse_usage_reported = 105065;
       DisplayPortErrorStats display_port_error_stats = 105066;
       HDCPAuthTypeStats hdcp_auth_type_stats = 105067;
       DisplayPortUsage display_port_usage = 105068;
-      FuelGaugeAbnormality fuel_gauge_abnormality = 105069;
+      FuelGaugeAbnormalityReported fuel_gauge_abnormality_reported = 105069;
       MmProcessUsageByOomGroupSnapshot mm_process_usage_by_oom_group_snapshot = 105070;
       MmGcmaSnapshot mm_gcma_snapshot = 105071;
       MmGcmaStats mm_gcma_stats = 105072;
+      VendorAudioUsbDeviceCapabilityStats vendor_audio_usb_device_capability_stats = 105073 [(android.os.statsd.module) = "pixelaudio"];
+      BatteryTimeToFullStatsReported battery_time_to_full_stats_reported = 105074;
+      VendorAudioDirectUsbAccessUsageStats vendor_audio_direct_usb_access_usage_stats = 105075 [(android.os.statsd.module) = "pixelaudio"];
+      VendorAudioUsbConfigStats vendor_audio_usb_config_stats = 105076 [(android.os.statsd.module) = "pixelaudio"];
+      GpuFrozenAppsMemoryPerUid gpu_frozen_apps_memory_per_uid = 105078;
+      RepairModeEntered repair_mode_entered = 105079;
+      RepairModeExited repair_mode_exited = 105080;
+      RepairModeLowStorageReported repair_mode_low_storage_reported = 105081;
+      RepairModeErrorReported repair_mode_error_reported = 105082;
+      DisplayPortDSCSupportCountStatsReported display_port_dsc_support_stats = 105083;
+      DisplayPortMaxResolutionCountStatsReported display_port_max_resolution_stats = 105084;
+      VendorAudioDspRecordUsageStatsReported vendor_audio_dsp_record_usage_stats_reported = 105085 [(android.os.statsd.module) = "pixelaudio"];
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -558,6 +570,8 @@ message VendorSpeakerStatsReported {
   optional int32 excursion = 5;
   /* The speaker's heart beat count */
   optional int32 heartbeat = 6;
+  /* The speaker's version */
+  optional int32 version = 7;
 }
 
 /* A message containing how many times of ufs host reset */
@@ -1372,6 +1386,9 @@ message VendorAudioHardwareStatsReported {
 
   /* cca_enable: UI enable & algorithm is inactive (C2 or C4) */
   optional int32 cca_enable_count_per_day = 8;
+
+  /* version: version of the data. */
+  optional int32 version = 9;
 }
 
 /**
@@ -1881,6 +1898,7 @@ message GpuEvent {
       MALI_PMODE_ENTRY_FAILURE = 21;
       MALI_GPU_PAGE_FAULT = 22;
       MALI_MMU_AS_ACTIVE_STUCK = 23;
+      MALI_TRACE_BUF_INVALID_SLOT = 24;
     }
 
     /* Vendor reverse domain name (expecting "com.google.pixel"). */
@@ -2197,6 +2215,7 @@ message PixelImpulseUsageReported {
   enum Tag {
       TAG_UNKNOWN = 0;
       TAG_TEMPERATURE_READ_DELAY = 1;
+      TAG_SKIN_TEMPERATURE = 2;
   }
   /* Tag for debugging purpose */
   optional Tag tag = 5;
@@ -2254,6 +2273,12 @@ message PixelImpulseUsageReported {
    */
   /* Used when state_source == STATE_SOURCE_UID_IMPORTANCE */
   optional android.app.Importance uid_importance_cut_point = 15;
+
+  /* Expected value for temperature delta in Celsius */
+  optional float expected_temperature_celsius = 16;
+
+  /* Actual value for temperature delta in Celsius */
+  optional float actual_temperature_celsius = 17;
 }
 
 /**
@@ -2324,9 +2349,9 @@ message DisplayPortUsage {
  * Logged from:
  *    hardware/google/pixel/pixelstats/BatteryFGReporter.cpp
  */
-message FuelGaugeAbnormality {
+message FuelGaugeAbnormalityReported {
   enum Event {
-    NONE = 0;            // no abnormal event
+    UNKNOWN_EVENT = 0;
     FULLCAPNOM_LOW = 1;  // unexpected fullcapnom learning (too low)
     FULLCAPNOM_HIGH = 2; // unexpected fullcapnom learning (too high)
     REPSOC_EDET = 3;     // empty detect false alarm
@@ -2335,8 +2360,9 @@ message FuelGaugeAbnormality {
     VFOCV = 6;           // vfocv estimation wrong
   }
   enum EventState {
-    CLEAR = 0;
-    TRIGGER = 1;
+    UNKNOWN_STATE = 0;
+    UNTRIGGER = 1;
+    TRIGGER = 2;
   }
   /* Vendor reverse domain name */
   optional string reverse_domain_name = 1;
@@ -2423,9 +2449,9 @@ message MmProcessUsageByOomGroupSnapshot {
   optional int64 nr_task = 4;
   optional int64 file_rss = 5;
   optional int64 anon_rss = 6;
-  optional int64 swap_ent = 7;
-  optional int64 shmem_rss = 8;
-  optional int64 pgtable = 9;
+  optional int64 pgtable = 7;
+  optional int64 swap_ent = 8;
+  optional int64 shmem_rss = 9;
 }
 
 /*
@@ -2452,3 +2478,303 @@ message MmGcmaStats {
   repeated int64 latency_histogram = 6;
 }
 
+/*
+ * A message containing the USB audio capability of the connected accessories.
+ */
+message VendorAudioUsbDeviceCapabilityStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  enum UsbMode {
+    UNKNOWN_MODE = 0;
+    ASYNC_MODE = 1;
+    ADAPTIVE_MODE = 2;
+    SYNC_MODE = 3;
+  }
+  /* USB Modes */
+  repeated UsbMode playback_supported_modes = 2;
+  repeated UsbMode capture_supported_modes = 3;
+
+  enum UsbSpeed {
+    OTHER_SPEED = 0;
+    FULL_SPEED = 1;
+    HIGH_SPEED = 2;
+    SUPER_SPEED = 3;
+  }
+  /* USB Speed */
+  optional UsbSpeed usb_speed = 4 [deprecated = true];
+
+  /* Data Packets Interval in ms. Expected value is between 125 and 1000.*/
+  repeated int32 playback_data_packet_interval = 5;
+  repeated int32 capture_data_packet_interval = 6;
+
+  /* List of supported sample rates in increasing order. */
+  repeated int32 playback_supported_sample_rates = 7;
+  repeated int32 capture_supported_sample_rates = 8;
+
+  /* Maximum number of channels supported */
+  optional int32 playback_supported_channel_count = 9;
+  optional int32 capture_supported_channel_count = 10;
+
+  enum PcmType {
+    DEFAULT = 0;
+    INT16_BIT = 1;
+    INT32_BIT = 2;
+    FIXED_Q824 = 3;
+    FLOAT32_BIT = 4;
+    INT24_BIT = 5;
+    DSD32_BIT = 6;
+  }
+  /* Supported PCM Type */
+  repeated PcmType playback_supported_pcm_types = 11;
+  repeated PcmType capture_supported_pcm_types = 12;
+
+  /* Supported endian */
+  optional bool is_big_endian = 13;
+
+  /* Is USB device support playback */
+  optional bool is_playback = 14;
+
+  /* Duration connected */
+  optional int32 duration_second_connected = 15;
+};
+
+/*
+ * A message containing battery time to full stats
+ * Logged from:
+ *    hardware/google/pixel/pixelstats/BatteryTTFReporter.cpp
+ */
+message BatteryTimeToFullStatsReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // The charge_counter and elap of each soc
+  optional int32 ttf_type = 2;
+  optional int32 ttf_range = 3;
+  optional int32 soc_0 = 4;
+  optional int32 soc_1 = 5;
+  optional int32 soc_2 = 6;
+  optional int32 soc_3 = 7;
+  optional int32 soc_4 = 8;
+  optional int32 soc_5 = 9;
+  optional int32 soc_6 = 10;
+  optional int32 soc_7 = 11;
+  optional int32 soc_8 = 12;
+  optional int32 soc_9 = 13;
+}
+
+/*
+ * A message containing Direct USB Access event.
+ */
+message VendorAudioDirectUsbAccessUsageStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  optional int32 duration_second = 2;
+};
+
+/*
+ * A message containing Usb Config event.
+ */
+message VendorAudioUsbConfigStats {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Is config for playback or capture */
+  optional bool is_playback = 2;
+
+  /* Is config for hifi */
+  optional bool has_hifi = 3;
+
+  /* Sample rate used */
+  optional int32 sample_rate = 4;
+
+  /* Channel used */
+  optional int32 channel = 5;
+
+  /* Pcm Type used */
+  optional int32 pcm_type = 6;
+
+  /* Duration in second */
+  optional int32 duration_second = 7;
+};
+
+/* GPU memory allocation information for frozen apps */
+message GpuFrozenAppsMemoryPerUid {
+  /* Vendor reverse domain name (expecting "com.google.pixel"). */
+  optional string reverse_domain_name = 1;
+
+  /* UID of the frozen app. */
+  optional int32 uid = 2 [(android.os.statsd.is_uid) = true];
+
+  /* Total amount of GPU memory allocated by this app, in kilobytes. */
+  optional int64 gpu_memory_kb = 3;
+}
+
+/**
+ * Logs for repair mode enter
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 5 times in 1 min | Avg: 3 times per device per year
+ */
+ message RepairModeEntered {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on device when entering repair mode in megabyte
+  optional int64 storage_size_mb = 2;
+}
+
+/**
+ * Logs for repair mode exit
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 5 times in 1 min | Avg: 3 times per device per year
+ */
+message RepairModeExited {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on device when exiting repair mode in megabyte
+  optional int64 storage_size_mb = 2;
+  // whether diagnostic tool is executed during repair mode
+  // false if diagnostic tool is never run
+  // true if diagnostic is run once or more
+  optional bool is_diagnostic_run = 3;
+
+  // how user auth/verify the credential to exit repair mode
+  enum ExitMethod {
+    UNSPECIFIED = 0;
+    // auth by google account
+    GAUTH = 1;
+    // auth by screen lock on the device
+    SCREEN_LOCK = 2;
+  }
+  // method for auth when exiting repair mode
+  optional ExitMethod exit_method = 4;
+}
+
+/**
+ * Logs when a user cannot enter repair mode due to insufficient storage
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 1 time in 5 mins | Avg: 20 times per device per year
+ */
+message RepairModeLowStorageReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+  // free storage size on the device in megabyte
+  optional int64 storage_size_mb = 2;
+}
+
+/**
+ * Logs programmatic error that prevent users from entering repair mode
+ * Logged from:
+ *   vendor/google/apps/RepairMode/
+ *
+ * Estimated Logging Rate:
+ * Peak: 1 time in 3 mins | Avg: 2 times per device per year
+ */
+message RepairModeErrorReported {
+  // Vendor reverse domain name (expecting "com.google.pixel").
+  optional string reverse_domain_name = 1;
+
+  // Error type that prevent user from entering repair mode
+  enum ErrorType {
+    UNSPECIFIED = 0;
+    // Dynamic system failed to install image
+    INSTALLED_FAILED = 1;
+    // Failed to enable Dynamic system
+    ENABLE_DYN_FAILED = 2;
+    // Failed to reboot
+    REBOOT_FAILED = 3;
+  }
+
+  optional ErrorType error_type = 2;
+}
+
+/*
+ * Log if a device is plugged into a display that
+ * supports forward error correction (FEC) and
+ * display stream compression (DSC)
+ */
+message DisplayPortDSCSupportCountStatsReported{
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Counts of connections where FEC/DSC is
+   * supported or not
+   */
+  optional int32 fec_dsc_supported = 2;
+  optional int32 fec_dsc_not_supported = 3;
+}
+
+/*
+* A message containing the use counts of various maximum
+* resolutions the displays plugged into the phone use.
+*/
+message DisplayPortMaxResolutionCountStatsReported{
+
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Other Resolutions that don't fit into the current list */
+  optional int32 max_res_other = 2;
+
+  /* Predefined Resolutions */
+  optional int32 max_res_1366_768 = 3;
+  optional int32 max_res_1440_900 = 4;
+  optional int32 max_res_1600_900 = 5;
+  optional int32 max_res_1920_1080 = 6;
+  optional int32 max_res_2560_1080 = 7;
+  optional int32 max_res_2560_1440 = 8;
+  optional int32 max_res_3440_1440 = 9;
+  optional int32 max_res_3840_2160 = 10;
+  optional int32 max_res_5120_2880 = 11;
+  optional int32 max_res_7680_4320 = 12;
+}
+
+/*
+ * A message containing recording usage event.
+ * Logged from:
+ *   vendor/google/whitechapel/audio/hal/aidl/audio/metric/suez_data_adapter/statsd_suez_data_adapter.cc
+ *
+ * Estimated Logging Rate: Once per audio recording.
+ */
+message VendorAudioDspRecordUsageStatsReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  enum Type {
+    UNKNOWN = 0;
+    UC_AUDIO_RECORD = 1;
+    UC_LOW_LATENCY_AUDIO_RECORD = 2;
+    UC_MMAP_RECORD = 3;
+    IN_HANDSET_MIC = 4;
+    IN_HANDSET_DUAL_MIC = 5;
+    IN_HANDSET_TRIPLE_MIC = 6;
+    IN_CAMCORDER_LANDSCAPE = 7;
+    IN_CAMCORDER_INVERT_LANDSCAPE = 8;
+    IN_CAMCORDER_PORTRAIT = 9;
+    IN_CAMCORDER_SELFIE_LANDSCAPE = 10;
+    IN_CAMCORDER_SELFIE_INVERT_LANDSCAPE = 11;
+    IN_CAMCORDER_SELFIE_PORTRAIT = 12;
+    IN_CAMCORDER_MIC = 13;
+    IN_CAMCORDER_TIRPLE_MIC = 14;
+    CUSTOM_IN_PCM1 = 15;
+    CUSTOM_IN_PCM2 = 16;
+    CUSTOM_IN_PCM3 = 17;
+    CUSTOM_IN_PCM4 = 18;
+    CUSTOM_IN_PCM5 = 19;
+  }
+
+  /* Type of Backend used in recording */
+  optional Type type = 2;
+
+  /* Duration in second */
+  optional int32 duration_second = 3;
+};
