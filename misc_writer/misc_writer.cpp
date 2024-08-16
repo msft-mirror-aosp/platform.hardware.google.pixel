@@ -164,23 +164,14 @@ bool MiscWriter::UpdateSotaConfig(std::optional<size_t> override_offset) {
     }
   }
 
-  // Update sota csku
-  offset = override_offset.value_or(offsetof(bootloader_message_vendor_t, sota_csku));
-  content = ::android::base::GetProperty("persist.vendor.factoryota.csku", "");
-  if (content.size() != 0) {
-    content.resize(sizeof(bootloader_message_vendor_t::sota_csku));
-    LOG(INFO) << "persist.vendor.factoryota.csku=" << content;
-    if (!WriteMiscPartitionVendorSpace(content.data(), content.size(), offset, &err)) {
-      LOG(ERROR) << "Failed to write " << content << " at offset " << offset << " : " << err;
-      return false;
-    }
-  }
-
   // Update sota csku signature
   offset = override_offset.value_or(offsetof(bootloader_message_vendor_t, sota_csku_signature));
-  std::string signature = ::android::base::GetProperty("persist.vendor.factoryota.signature", "");
-  if (content.size() != 0) {
-    LOG(INFO) << "persist.vendor.factoryota.signature=" << content;
+  std::string signature;
+  signature += ::android::base::GetProperty("persist.vendor.factoryota.signature1", "");
+  signature += ::android::base::GetProperty("persist.vendor.factoryota.signature2", "");
+  signature += ::android::base::GetProperty("persist.vendor.factoryota.signature3", "");
+  if (signature.size() != 0) {
+    LOG(INFO) << "persist.vendor.factoryota.signature=" << signature;
     if (signature.length() != 2 * sizeof(bootloader_message_vendor_t::sota_csku_signature)) {
       LOG(ERROR) << "signature.length() should be "
                 << 2 * sizeof(bootloader_message_vendor_t::sota_csku_signature) << " not "
@@ -196,6 +187,16 @@ bool MiscWriter::UpdateSotaConfig(std::optional<size_t> override_offset) {
       }
     if (!WriteMiscPartitionVendorSpace(content.data(), content.size(), offset, &err)) {
       LOG(ERROR) << "Failed to write signature at offset " << offset << " : " << err;
+      return false;
+    }
+
+    // Update sota csku
+    offset = override_offset.value_or(offsetof(bootloader_message_vendor_t, sota_csku));
+    content = ::android::base::GetProperty("persist.vendor.factoryota.csku", "");
+    content.resize(sizeof(bootloader_message_vendor_t::sota_csku));
+    LOG(INFO) << "persist.vendor.factoryota.csku=" << content;
+    if (!WriteMiscPartitionVendorSpace(content.data(), content.size(), offset, &err)) {
+      LOG(ERROR) << "Failed to write " << content << " at offset " << offset << " : " << err;
       return false;
     }
   }
