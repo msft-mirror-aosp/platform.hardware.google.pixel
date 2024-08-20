@@ -762,23 +762,31 @@ bool ThermalHelperImpl::initializeCoolingDevices(
             return false;
         }
 
-        std::string state2power_path = ::android::base::StringPrintf(
-                "%s/%s", path.data(), kCoolingDeviceState2powerSuffix.data());
-        std::string state2power_str;
-        if (::android::base::ReadFileToString(state2power_path, &state2power_str)) {
-            LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
-                      << " use state2power read from sysfs";
-            cooling_device_info_pair.second.state2power.clear();
+        // Get cooling device state2power table from sysfs if not defined in config
+        if (!cooling_device_info_pair.second.state2power.size()) {
+            std::string state2power_path = ::android::base::StringPrintf(
+                    "%s/%s", path.data(), kCoolingDeviceState2powerSuffix.data());
+            std::string state2power_str;
+            if (::android::base::ReadFileToString(state2power_path, &state2power_str)) {
+                LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
+                          << " use State2power read from sysfs";
+                std::stringstream power(state2power_str);
+                unsigned int power_number;
+                while (power >> power_number) {
+                    cooling_device_info_pair.second.state2power.push_back(
+                            static_cast<float>(power_number));
+                }
+            }
+        }
 
-            std::stringstream power(state2power_str);
-            unsigned int power_number;
-            int i = 0;
-            while (power >> power_number) {
-                cooling_device_info_pair.second.state2power.push_back(
-                        static_cast<float>(power_number));
-                LOG(INFO) << "Cooling device " << cooling_device_info_pair.first << " state:" << i
-                          << " power: " << power_number;
-                i++;
+        // Check if there's any wrong ordered state2power value to avoid cdev stuck issue
+        for (size_t i = 0; i < cooling_device_info_pair.second.state2power.size(); ++i) {
+            LOG(INFO) << "Cooling device " << cooling_device_info_pair.first << " state:" << i
+                      << " power: " << cooling_device_info_pair.second.state2power[i];
+            if (i > 0 && cooling_device_info_pair.second.state2power[i] >
+                                 cooling_device_info_pair.second.state2power[i - 1]) {
+                LOG(ERROR) << "Higher power with higher state on cooling device "
+                           << cooling_device_info_pair.first << "'s state" << i;
             }
         }
 
@@ -1358,7 +1366,6 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
         bool force_update = false;
         bool force_no_cache = false;
         Temperature temp;
-        TemperatureThreshold threshold;
         SensorStatus &sensor_status = name_status_pair.second;
         const SensorInfo &sensor_info = sensor_info_map_.at(name_status_pair.first);
         bool max_throttling = false;
@@ -1450,11 +1457,6 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
         if (!readTemperature(name_status_pair.first, &temp, &throttling_status, force_no_cache)) {
             LOG(ERROR) << __func__
                        << ": error reading temperature for sensor: " << name_status_pair.first;
-            continue;
-        }
-        if (!readTemperatureThreshold(name_status_pair.first, &threshold)) {
-            LOG(ERROR) << __func__ << ": error reading temperature threshold for sensor: "
-                       << name_status_pair.first;
             continue;
         }
 
