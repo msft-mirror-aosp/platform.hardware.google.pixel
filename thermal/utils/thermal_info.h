@@ -127,6 +127,7 @@ enum class SensorFusionType : uint32_t {
     SENSOR = 0,
     ODPM,
     CONSTANT,
+    CDEV,
 };
 
 std::ostream &operator<<(std::ostream &os, const SensorFusionType &sensor_fusion_type);
@@ -214,6 +215,7 @@ struct SensorInfo {
     ThrottlingArray hot_hysteresis;
     ThrottlingArray cold_hysteresis;
     std::string temp_path;
+    std::string severity_reference;
     float vr_threshold;
     float multiplier;
     std::chrono::milliseconds polling_delay;
@@ -246,7 +248,10 @@ struct PowerRailInfo {
     std::unique_ptr<VirtualPowerRailInfo> virtual_power_rail_info;
 };
 
-bool ParseThermalConfig(std::string_view config_path, Json::Value *config);
+bool LoadThermalConfig(std::string_view config_path, Json::Value *config);
+bool ParseThermalConfig(std::string_view config_path, Json::Value *config,
+                        std::unordered_set<std::string> *loaded_config_paths);
+void MergeConfigEntries(Json::Value *config, Json::Value *sub_config, std::string_view member_name);
 bool ParseSensorInfo(const Json::Value &config,
                      std::unordered_map<std::string, SensorInfo> *sensors_parsed);
 bool ParseCoolingDevice(const Json::Value &config,
