@@ -101,8 +101,9 @@ void HintManager::DoHintStatus(const std::string &hint_type, std::chrono::millis
     std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
     actions_.at(hint_type).status->stats.count.fetch_add(1);
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), (timeout_ms == kMilliSecondZero) ? std::numeric_limits<int>::max()
-                                                                   : timeout_ms.count());
+    ATRACE_INT(("H:" + hint_type).c_str(), (timeout_ms == kMilliSecondZero)
+                                                   ? std::numeric_limits<int>::max()
+                                                   : timeout_ms.count());
     if (now > actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -119,7 +120,7 @@ void HintManager::EndHintStatus(const std::string &hint_type) {
     std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
     // Update HintStats if the hint ends earlier than expected end_time
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), 0);
+    ATRACE_INT(("H:" + hint_type).c_str(), 0);
     if (now < actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -940,9 +941,6 @@ std::shared_ptr<AdpfConfig> HintManager::GetAdpfProfile(const std::string &tag) 
     if (adpfs_.empty())
         return nullptr;
     if (tag_profile_map_.find(tag) == tag_profile_map_.end()) {
-        // If no profile was set for this tag, use 1st ADPF profile.
-        LOG(VERBOSE) << "GetAdpfProfile('" << tag << "') not found, use first profile: '"
-                     << GetAdpfProfileFromDoHint()->mName << "'";
         // TODO(jimmyshiu@): `return adpfs_[0]` once the GetAdpfProfileFromDoHint() retired.
         return GetAdpfProfileFromDoHint();
     }
