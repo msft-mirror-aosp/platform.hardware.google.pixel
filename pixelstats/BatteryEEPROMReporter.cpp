@@ -15,6 +15,7 @@
  */
 
 #define LOG_TAG "pixelstats: BatteryEEPROM"
+#define BATTERY_CYCLE_COUNT_PATH "/sys/class/power_supply/battery/cycle_count"
 
 #include <log/log.h>
 #include <time.h>
@@ -23,6 +24,8 @@
 #include <cmath>
 
 #include <android-base/file.h>
+#include <android-base/parseint.h>
+#include <android-base/strings.h>
 #include <pixelstats/BatteryEEPROMReporter.h>
 #include <pixelstats/StatsHelper.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
@@ -55,6 +58,10 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
                                            const std::string &path) {
     std::string file_contents;
     std::string history_each;
+    std::string cycle_count;
+
+    const std::string cycle_count_path(BATTERY_CYCLE_COUNT_PATH);
+    int sparse_index_count = 0;
 
     const int kSecondsPerMonth = 60 * 60 * 24 * 30;
     int64_t now = getTimeSecs();
@@ -62,6 +69,20 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     if ((report_time_ != 0) && (now - report_time_ < kSecondsPerMonth)) {
         ALOGD("Not upload time. now: %" PRId64 ", pre: %" PRId64, now, report_time_);
         return;
+    }
+
+    if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
+        int cnt;
+
+        cycle_count = android::base::Trim(cycle_count);
+        if (android::base::ParseInt(cycle_count, &cnt)) {
+            cnt /= 10;
+            if (cnt > BATT_HIST_NUM_MAX_V2)
+                sparse_index_count = cnt % BATT_HIST_NUM_MAX_V2;
+        }
+
+        ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
+              cycle_count.c_str());
     }
 
     if (!ReadFileToString(path.c_str(), &file_contents)) {
@@ -129,7 +150,12 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
             hist.msoc = (uint8_t)histv2.mixsoc * 2;
             hist.full_cap = (int16_t)histv2.fullcaprep * 125 / 1000;
             hist.full_rep = (int16_t)histv2.fullcapnom * 125 / 1000;
-            hist.cycle_cnt = (i + 1) * 10;
+
+            /* i < sparse_index_count: 20 40 60 80  */
+            if (i < sparse_index_count)
+                hist.cycle_cnt = (i + 1) * 20;
+            else
+                hist.cycle_cnt = (i + sparse_index_count + 1) * 10;
 
             reportEvent(stats_client, hist);
             report_time_ = getTimeSecs();
