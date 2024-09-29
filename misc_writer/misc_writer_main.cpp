@@ -58,7 +58,6 @@ static int Usage(std::string_view name) {
   std::cerr << "  --set-display-mode <mode>     Write the display mode at boot\n";
   std::cerr << "  --clear-display-mode          Clear the display mode at boot\n";
   std::cerr << "  --set-trending-issue-pattern <string within 2000 byte> Write a regex string";
-  std::cerr << "  --read-trending-issue-pattern Read eagleEye misc portion";
   std::cerr << "Writes the given hex string to the specified offset in vendor space in /misc "
                "partition.\nDefault offset is used for each action unless "
                "--override-vendor-space-offset is specified.\n";
@@ -88,7 +87,6 @@ int main(int argc, char** argv) {
     { "set-display-mode", required_argument, nullptr, 0 },
     { "clear-display-mode", no_argument, nullptr, 0 },
     { "set-trending-issue-pattern", required_argument, nullptr, 0 },
-    { "read-trending-issue-pattern", no_argument, nullptr, 0 },
     { nullptr, 0, nullptr, 0 },
   };
 
@@ -271,13 +269,6 @@ int main(int argc, char** argv) {
         return Usage(argv[0]);
       }
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, argv[2]);
-    } else if (option_name == "read-trending-issue-pattern"s) {
-      if (misc_writer) {
-        LOG(ERROR) << "Misc writer action has already been set";
-        return Usage(argv[0]);
-      }
-      std::cerr << "function is not yet implemented";
-      return EXIT_SUCCESS;
     } else {
       LOG(FATAL) << "Unreachable path, option_name: " << option_name;
     }
