@@ -204,7 +204,8 @@ float ThermalThrottling::updatePowerBudget(
 
     // Go through the binded cdev, check current throttle status
     for (const auto &binded_cdev_info_pair :
-         (sensor_info.throttling_info->profile_map.empty()
+         ((sensor_info.throttling_info->profile_map.empty() ||
+           !sensor_info.throttling_info->profile_map.contains(profile))
                   ? sensor_info.throttling_info->binded_cdev_info_map
                   : sensor_info.throttling_info->profile_map.at(profile))) {
         if (throttling_status.pid_cdev_request_map.at(binded_cdev_info_pair.first) >
