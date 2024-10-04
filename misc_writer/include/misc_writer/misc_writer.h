@@ -48,6 +48,8 @@ enum class MiscWriterActions : int32_t {
   kSetDisplayMode,
   kClearDisplayMode,
   kWriteEagleEyePatterns,
+  kSetDisableFaceauthEval,
+  kClearDisableFaceauthEval,
 
   kUnset = -1,
 };
@@ -109,6 +111,7 @@ class MiscWriter {
     static constexpr char kTimeMinRtc[] = "timeminrtc=";
     static constexpr uint32_t kFaceauthEvalValOffsetInVendorSpace =
             offsetof(bootloader_message_vendor_t, faceauth_eval);
+    static constexpr char kDisableFaceauthEvalFlag[] = "disable-faceauth-eval";
     static constexpr uint32_t kSotaScheduleShipmodeOffsetInVendorSpace =
             offsetof(bootloader_message_vendor_t, sota_schedule_shipmode);
     static constexpr uint32_t kDstTransitionOffsetInVendorSpace =
