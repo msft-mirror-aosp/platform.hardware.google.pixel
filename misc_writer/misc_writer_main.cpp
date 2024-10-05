@@ -58,6 +58,8 @@ static int Usage(std::string_view name) {
   std::cerr << "  --set-display-mode <mode>     Write the display mode at boot\n";
   std::cerr << "  --clear-display-mode          Clear the display mode at boot\n";
   std::cerr << "  --set-trending-issue-pattern <string within 2000 byte> Write a regex string";
+  std::cerr << "  --set-disable-faceauth-eval   Write disable-faceauth-eval flag\n";
+  std::cerr << "  --clear-disable-faceauth-eval Clear disable-faceauth-eval flag\n";
   std::cerr << "Writes the given hex string to the specified offset in vendor space in /misc "
                "partition.\nDefault offset is used for each action unless "
                "--override-vendor-space-offset is specified.\n";
@@ -86,6 +88,8 @@ int main(int argc, char** argv) {
     { "set-dstoffset", required_argument, nullptr, 0 },
     { "set-display-mode", required_argument, nullptr, 0 },
     { "clear-display-mode", no_argument, nullptr, 0 },
+    { "set-disable-faceauth-eval", no_argument, nullptr, 0 },
+    { "clear-disable-faceauth-eval", no_argument, nullptr, 0 },
     { "set-trending-issue-pattern", required_argument, nullptr, 0 },
     { nullptr, 0, nullptr, 0 },
   };
@@ -100,6 +104,8 @@ int main(int argc, char** argv) {
     { "clear-wrist-orientation", MiscWriterActions::kClearWristOrientationFlag },
     { "set-sota-config", MiscWriterActions::kSetSotaConfig },
     { "clear-display-mode", MiscWriterActions::kClearDisplayMode },
+    { "set-disable-faceauth-eval", MiscWriterActions::kSetDisableFaceauthEval },
+    { "clear-disable-faceauth-eval", MiscWriterActions::kClearDisableFaceauthEval },
   };
 
   std::unique_ptr<MiscWriter> misc_writer;
