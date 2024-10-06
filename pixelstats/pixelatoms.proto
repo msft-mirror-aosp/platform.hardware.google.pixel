@@ -484,6 +484,18 @@ message BatteryEEPROM {
     optional int32 timer_h = 23;
     /* The full capacity of the battery learning at the end of every charge cycle */
     optional int32 full_rep = 24;
+
+    enum BattPairingEvent {
+      WRITE_ERROR = -4;
+      READ_ERROR = -3;
+      MISMATCH = -2;
+      DISABLED = -1;
+      ENABLED = 0;
+      PAIRED = 1;
+      RESET = 2;
+    };
+
+    optional BattPairingEvent battery_pairing = 25;
 }
 
 /* A message containing an exceptional event from citadel. */
