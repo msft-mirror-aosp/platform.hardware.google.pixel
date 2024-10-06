@@ -46,6 +46,23 @@ using android::hardware::google::pixel::PixelAtoms::BatteryEEPROM;
 
 BatteryEEPROMReporter::BatteryEEPROMReporter() {}
 
+bool BatteryEEPROMReporter::ReadFileToInt(const std::string &path, int16_t *val) {
+    std::string file_contents;
+
+    if (!ReadFileToString(path.c_str(), &file_contents)) {
+        ALOGI("Unable to read %s - %s", path.c_str(), strerror(errno));
+        return false;
+    }
+
+    file_contents = android::base::Trim(file_contents);
+    if (!android::base::ParseInt(file_contents, val)) {
+        ALOGI("Unable to convert %s to int - %s", path.c_str(), strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
 void BatteryEEPROMReporter::setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset,
                                               int content) {
     std::vector<VendorAtomValue> &val = *values;
@@ -95,6 +112,8 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     const int kHistTotalLen = file_contents.size();
 
     ALOGD("kHistTotalLen=%d\n", kHistTotalLen);
+
+    ReadFileToInt(kBatteryPairingPath, &hist.battery_pairing);
 
     if (kHistTotalLen >= (LINESIZE_V2 * BATT_HIST_NUM_MAX_V2)) {
         struct BatteryHistoryExtend histv2;
@@ -234,17 +253,18 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
             BatteryEEPROM::kMaxIbattFieldNumber,  BatteryEEPROM::kMinIbattFieldNumber,
             BatteryEEPROM::kChecksumFieldNumber,  BatteryEEPROM::kTempcoFieldNumber,
             BatteryEEPROM::kRcomp0FieldNumber,    BatteryEEPROM::kTimerHFieldNumber,
-            BatteryEEPROM::kFullRepFieldNumber};
+            BatteryEEPROM::kFullRepFieldNumber,   BatteryEEPROM::kBatteryPairingFieldNumber};
 
     ALOGD("reportEvent: cycle_cnt:%d, full_cap:%d, esr:%d, rslow:%d, soh:%d, "
           "batt_temp:%d, cutoff_soc:%d, cc_soc:%d, sys_soc:%d, msoc:%d, "
           "batt_soc:%d, reserve:%d, max_temp:%d, min_temp:%d, max_vbatt:%d, "
           "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%#x, full_rep:%d, "
-          "tempco:%#x, rcomp0:%#x, timer_h:%d",
+          "tempco:%#x, rcomp0:%#x, timer_h:%d, batt_pair:%d",
           hist.cycle_cnt, hist.full_cap, hist.esr, hist.rslow, hist.soh, hist.batt_temp,
           hist.cutoff_soc, hist.cc_soc, hist.sys_soc, hist.msoc, hist.batt_soc, hist.reserve,
           hist.max_temp, hist.min_temp, hist.max_vbatt, hist.min_vbatt, hist.max_ibatt,
-          hist.min_ibatt, hist.checksum, hist.full_rep, hist.tempco, hist.rcomp0, hist.timer_h);
+          hist.min_ibatt, hist.checksum, hist.full_rep, hist.tempco, hist.rcomp0, hist.timer_h,
+          hist.battery_pairing);
 
     std::vector<VendorAtomValue> values(eeprom_history_fields.size());
     VendorAtomValue val;
@@ -295,6 +315,8 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     values[BatteryEEPROM::kTimerHFieldNumber - kVendorAtomOffset] = val;
     val.set<VendorAtomValue::intValue>(hist.full_rep);
     values[BatteryEEPROM::kFullRepFieldNumber - kVendorAtomOffset] = val;
+    val.set<VendorAtomValue::intValue>(hist.battery_pairing);
+    values[BatteryEEPROM::kBatteryPairingFieldNumber - kVendorAtomOffset] = val;
 
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
