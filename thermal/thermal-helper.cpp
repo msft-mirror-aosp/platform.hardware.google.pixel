@@ -832,7 +832,6 @@ bool ThermalHelperImpl::initializeCoolingDevices(
                            << cooling_device_info_pair.second.state2power.size()
                            << ", number should be " << cooling_device_info_pair.second.max_state + 1
                            << " (max_state + 1)";
-                return false;
             }
         }
 
