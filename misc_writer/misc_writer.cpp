@@ -124,6 +124,19 @@ bool MiscWriter::PerformAction(std::optional<size_t> override_offset) {
                           : std::string(32, 0);
         content.resize(32, 0);
         break;
+    case MiscWriterActions::kWriteEagleEyePatterns:
+        offset = override_offset.value_or(kEagleEyeOffset);
+        content = stringdata_;
+        content.resize(sizeof(bootloader_message_vendor_t::eagleEye), 0);
+        break;
+    case MiscWriterActions::kSetDisableFaceauthEval:
+    case MiscWriterActions::kClearDisableFaceauthEval:
+        offset = override_offset.value_or(kFaceauthEvalValOffsetInVendorSpace);
+        content = (action_ == MiscWriterActions::kSetDisableFaceauthEval)
+                          ? kDisableFaceauthEvalFlag
+                          : std::string(32, 0);
+        content.resize(32, 0);
+        break;
     case MiscWriterActions::kUnset:
       LOG(ERROR) << "The misc writer action must be set";
       return false;

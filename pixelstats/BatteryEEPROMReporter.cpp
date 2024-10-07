@@ -15,6 +15,7 @@
  */
 
 #define LOG_TAG "pixelstats: BatteryEEPROM"
+#define BATTERY_CYCLE_COUNT_PATH "/sys/class/power_supply/battery/cycle_count"
 
 #include <log/log.h>
 #include <time.h>
@@ -23,6 +24,8 @@
 #include <cmath>
 
 #include <android-base/file.h>
+#include <android-base/parseint.h>
+#include <android-base/strings.h>
 #include <pixelstats/BatteryEEPROMReporter.h>
 #include <pixelstats/StatsHelper.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
@@ -43,6 +46,23 @@ using android::hardware::google::pixel::PixelAtoms::BatteryEEPROM;
 
 BatteryEEPROMReporter::BatteryEEPROMReporter() {}
 
+bool BatteryEEPROMReporter::ReadFileToInt(const std::string &path, int16_t *val) {
+    std::string file_contents;
+
+    if (!ReadFileToString(path.c_str(), &file_contents)) {
+        ALOGI("Unable to read %s - %s", path.c_str(), strerror(errno));
+        return false;
+    }
+
+    file_contents = android::base::Trim(file_contents);
+    if (!android::base::ParseInt(file_contents, val)) {
+        ALOGI("Unable to convert %s to int - %s", path.c_str(), strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
 void BatteryEEPROMReporter::setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset,
                                               int content) {
     std::vector<VendorAtomValue> &val = *values;
@@ -55,6 +75,10 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
                                            const std::string &path) {
     std::string file_contents;
     std::string history_each;
+    std::string cycle_count;
+
+    const std::string cycle_count_path(BATTERY_CYCLE_COUNT_PATH);
+    int sparse_index_count = 0;
 
     const int kSecondsPerMonth = 60 * 60 * 24 * 30;
     int64_t now = getTimeSecs();
@@ -62,6 +86,20 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     if ((report_time_ != 0) && (now - report_time_ < kSecondsPerMonth)) {
         ALOGD("Not upload time. now: %" PRId64 ", pre: %" PRId64, now, report_time_);
         return;
+    }
+
+    if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
+        int cnt;
+
+        cycle_count = android::base::Trim(cycle_count);
+        if (android::base::ParseInt(cycle_count, &cnt)) {
+            cnt /= 10;
+            if (cnt > BATT_HIST_NUM_MAX_V2)
+                sparse_index_count = cnt % BATT_HIST_NUM_MAX_V2;
+        }
+
+        ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
+              cycle_count.c_str());
     }
 
     if (!ReadFileToString(path.c_str(), &file_contents)) {
@@ -74,6 +112,8 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     const int kHistTotalLen = file_contents.size();
 
     ALOGD("kHistTotalLen=%d\n", kHistTotalLen);
+
+    ReadFileToInt(kBatteryPairingPath, &hist.battery_pairing);
 
     if (kHistTotalLen >= (LINESIZE_V2 * BATT_HIST_NUM_MAX_V2)) {
         struct BatteryHistoryExtend histv2;
@@ -129,7 +169,12 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
             hist.msoc = (uint8_t)histv2.mixsoc * 2;
             hist.full_cap = (int16_t)histv2.fullcaprep * 125 / 1000;
             hist.full_rep = (int16_t)histv2.fullcapnom * 125 / 1000;
-            hist.cycle_cnt = (i + 1) * 10;
+
+            /* i < sparse_index_count: 20 40 60 80  */
+            if (i < sparse_index_count)
+                hist.cycle_cnt = (i + 1) * 20;
+            else
+                hist.cycle_cnt = (i + sparse_index_count + 1) * 10;
 
             reportEvent(stats_client, hist);
             report_time_ = getTimeSecs();
@@ -208,17 +253,18 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
             BatteryEEPROM::kMaxIbattFieldNumber,  BatteryEEPROM::kMinIbattFieldNumber,
             BatteryEEPROM::kChecksumFieldNumber,  BatteryEEPROM::kTempcoFieldNumber,
             BatteryEEPROM::kRcomp0FieldNumber,    BatteryEEPROM::kTimerHFieldNumber,
-            BatteryEEPROM::kFullRepFieldNumber};
+            BatteryEEPROM::kFullRepFieldNumber,   BatteryEEPROM::kBatteryPairingFieldNumber};
 
     ALOGD("reportEvent: cycle_cnt:%d, full_cap:%d, esr:%d, rslow:%d, soh:%d, "
           "batt_temp:%d, cutoff_soc:%d, cc_soc:%d, sys_soc:%d, msoc:%d, "
           "batt_soc:%d, reserve:%d, max_temp:%d, min_temp:%d, max_vbatt:%d, "
           "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%#x, full_rep:%d, "
-          "tempco:%#x, rcomp0:%#x, timer_h:%d",
+          "tempco:%#x, rcomp0:%#x, timer_h:%d, batt_pair:%d",
           hist.cycle_cnt, hist.full_cap, hist.esr, hist.rslow, hist.soh, hist.batt_temp,
           hist.cutoff_soc, hist.cc_soc, hist.sys_soc, hist.msoc, hist.batt_soc, hist.reserve,
           hist.max_temp, hist.min_temp, hist.max_vbatt, hist.min_vbatt, hist.max_ibatt,
-          hist.min_ibatt, hist.checksum, hist.full_rep, hist.tempco, hist.rcomp0, hist.timer_h);
+          hist.min_ibatt, hist.checksum, hist.full_rep, hist.tempco, hist.rcomp0, hist.timer_h,
+          hist.battery_pairing);
 
     std::vector<VendorAtomValue> values(eeprom_history_fields.size());
     VendorAtomValue val;
@@ -269,6 +315,8 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     values[BatteryEEPROM::kTimerHFieldNumber - kVendorAtomOffset] = val;
     val.set<VendorAtomValue::intValue>(hist.full_rep);
     values[BatteryEEPROM::kFullRepFieldNumber - kVendorAtomOffset] = val;
+    val.set<VendorAtomValue::intValue>(hist.battery_pairing);
+    values[BatteryEEPROM::kBatteryPairingFieldNumber - kVendorAtomOffset] = val;
 
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
@@ -497,14 +545,15 @@ void BatteryEEPROMReporter::checkAndReportFGLearning(const std::shared_ptr<IStat
         }
     }
 
+    /* not found */
+    if (path.empty())
+        return;
+
     clock_gettime(CLOCK_MONOTONIC, &boot_time);
+
     readLogbuffer(path, kNumFGLearningFieldsV3, params.checksum, format, last_lh_check_, events);
     if (events.size() == 0)
         readLogbuffer(path, kNumFGLearningFieldsV2, params.checksum, format, last_lh_check_, events);
-    if (events.size() == 0)
-        readLogbuffer(path, kNumFGLearningFieldsV2, "learn", format, last_lh_check_, events);
-    if (events.size() == 0)
-        readLogbuffer(path, kNumFGLearningFields, "learn", format, last_lh_check_, events);
 
     for (int event_idx = 0; event_idx < events.size(); event_idx++) {
         std::vector<uint32_t> &event = events[event_idx];
@@ -528,17 +577,6 @@ void BatteryEEPROMReporter::checkAndReportFGLearning(const std::shared_ptr<IStat
             params.tempco = event[15];                 /* tempco */
             if (event.size() == kNumFGLearningFieldsV3)
                 params.soh = event[16];                /* unix time */
-        } else if (event.size() == kNumFGLearningFields) {
-            params.full_cap = event[0];     /* fcnom */
-            params.esr = event[1];          /* dpacc */
-            params.rslow = event[2];        /* dqacc */
-            params.max_vbatt = event[3];    /* fcrep */
-            params.full_rep = event[4];     /* repsoc */
-            params.min_vbatt = event[5];    /* mixsoc */
-            params.max_ibatt = event[6];    /* vfsoc */
-            params.min_ibatt = event[7];    /* fstats */
-            params.rcomp0 = event[8];       /* rcomp0 */
-            params.tempco = event[9];       /* tempco */
         } else {
             ALOGE("Not support %zu fields for FG learning event", event.size());
             continue;
@@ -566,21 +604,23 @@ void BatteryEEPROMReporter::checkAndReportValidation(const std::shared_ptr<IStat
         }
     }
 
+    /* not found */
+    if (path.empty())
+        return;
+
     clock_gettime(CLOCK_MONOTONIC, &boot_time);
 
-    if (!path.empty() && fileExists(path)) {
-        readLogbuffer(path, kNumValidationFields, params.checksum, format, last_hv_check_, events);
-        for (int event_idx = 0; event_idx < events.size(); event_idx++) {
-            std::vector<uint32_t> &event = events[event_idx];
-            if (event.size() == kNumValidationFields) {
-                params.full_cap = event[0]; /* fcnom */
-                params.esr = event[1];      /* dpacc */
-                params.rslow = event[2];    /* dqacc */
-                params.full_rep = event[3]; /* fcrep */
-                reportEventInt32(stats_client, params);
-            } else {
-                ALOGE("Not support %zu fields for History Validation event", event.size());
-            }
+    readLogbuffer(path, kNumValidationFields, params.checksum, format, last_hv_check_, events);
+    for (int event_idx = 0; event_idx < events.size(); event_idx++) {
+        std::vector<uint32_t> &event = events[event_idx];
+        if (event.size() == kNumValidationFields) {
+            params.full_cap = event[0]; /* fcnom */
+            params.esr = event[1];      /* dpacc */
+            params.rslow = event[2];    /* dqacc */
+            params.full_rep = event[3]; /* fcrep */
+            reportEventInt32(stats_client, params);
+        } else {
+            ALOGE("Not support %zu fields for History Validation event", event.size());
         }
     }
     last_hv_check_ = (unsigned int)boot_time.tv_sec;
