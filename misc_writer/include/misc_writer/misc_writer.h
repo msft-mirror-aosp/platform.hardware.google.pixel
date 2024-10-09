@@ -75,7 +75,7 @@ class MiscWriter {
         char user_preferred_resolution[32];
         char sota_csku[8];
         char sota_csku_signature[96];
-        char eagleEye[2000];
+        char eagleEye[32];
         char skipUnbootableCheck[32];
     } __attribute__((__packed__)) bootloader_message_vendor_t;
 

@@ -270,8 +270,8 @@ int main(int argc, char** argv) {
       if (misc_writer) {
         LOG(ERROR) << "Misc writer action has already been set";
         return Usage(argv[0]);
-      } else if (sizeof(argv[2]) >= 2000) {
-        std::cerr << "String is too large, we only take strings smaller than 2000, but you provide " << sizeof(argv[2]);
+      } else if (sizeof(argv[2]) >= 32) {
+        std::cerr << "String is too large, we only take strings smaller than 32, but you provide " << sizeof(argv[2]);
         return Usage(argv[0]);
       }
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, argv[2]);
