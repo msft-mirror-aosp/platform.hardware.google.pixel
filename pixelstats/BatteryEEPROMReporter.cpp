@@ -614,11 +614,15 @@ void BatteryEEPROMReporter::checkAndReportValidation(const std::shared_ptr<IStat
     for (int event_idx = 0; event_idx < events.size(); event_idx++) {
         std::vector<uint32_t> &event = events[event_idx];
         if (event.size() == kNumValidationFields) {
-            params.full_cap = event[0]; /* fcnom */
-            params.esr = event[1];      /* dpacc */
-            params.rslow = event[2];    /* dqacc */
-            params.full_rep = event[3]; /* fcrep */
+            params.full_cap = event[0]; /* first empty entry */
+            params.esr = event[1];      /* num of entries need to be recovered or fix result */
+            params.rslow = event[2];    /* last cycle count */
+            params.full_rep = event[3]; /* estimate cycle count after recovery */
             reportEventInt32(stats_client, params);
+            /* force report history metrics if it was recovered */
+            if (last_hv_check_ != 0) {
+                report_time_ = 0;
+            }
         } else {
             ALOGE("Not support %zu fields for History Validation event", event.size());
         }
