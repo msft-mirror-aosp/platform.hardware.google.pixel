@@ -118,6 +118,8 @@ class BatteryEEPROMReporter {
         uint8_t timer_h;
          /* The full capacity of the battery learning at the end of every charge cycle */
         uint16_t full_rep;
+        /* The battery pairing state */
+        int16_t battery_pairing;
     };
     /* The number of elements in struct BatteryHistory for P20 series */
     const int kNumBatteryHistoryFields = 19;
@@ -182,10 +184,13 @@ class BatteryEEPROMReporter {
     void reportEventInt32(const std::shared_ptr<IStats> &stats_client,
                      const struct BatteryHistoryInt32 &hist);
     void setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset, int content);
+    bool ReadFileToInt(const std::string &path, int16_t *val);
 
     const int kNum77759GMSRFields = 11;
     const int kNum77779GMSRFields = 9;
     const int kNum17201HISTFields = 16;
+
+    const std::string kBatteryPairingPath = "/sys/class/power_supply/battery/pairing_state";
 };
 
 }  // namespace pixel
