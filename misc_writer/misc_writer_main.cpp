@@ -240,10 +240,6 @@ int main(int argc, char** argv) {
       misc_writer = std::make_unique<MiscWriter>(iter->second);
     } else if (option_name == "set-dsttransition"s) {
       long long int dst_transition = strtoll(optarg, NULL, 10);
-      if (0 == dst_transition) {
-        LOG(ERROR) << "Failed to parse the dst transition:" << optarg;
-        return Usage(argv[0]);
-      }
       if (misc_writer) {
         LOG(ERROR) << "Misc writer action has already been set";
         return Usage(argv[0]);
