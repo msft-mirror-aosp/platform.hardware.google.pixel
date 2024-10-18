@@ -131,6 +131,12 @@ enum class SensorFusionType : uint32_t {
     CDEV,
 };
 
+enum class SensorReadStatus : uint32_t {
+    OKAY = 0,
+    UNDER_COLLECTING,
+    ERROR,
+};
+
 std::ostream &operator<<(std::ostream &os, const SensorFusionType &sensor_fusion_type);
 
 struct VirtualSensorInfo {

@@ -71,7 +71,7 @@ class ThermalPredictionsHelper {
     bool initializePredictionSensors(
             const std::unordered_map<std::string, SensorInfo> &sensor_info_map);
     bool updateSensor(std::string_view sensor_name, std::vector<float> &values);
-    float readSensor(std::string_view sensor_name);
+    SensorReadStatus readSensor(std::string_view sensor_name, float *temp);
 
   private:
     std::unordered_map<std::string, PredictorSensorInfo> predictor_sensors_;

@@ -116,12 +116,12 @@ bool ThermalPredictionsHelper::updateSensor(std::string_view sensor_name,
     return true;
 }
 
-float ThermalPredictionsHelper::readSensor(std::string_view sensor_name) {
+SensorReadStatus ThermalPredictionsHelper::readSensor(std::string_view sensor_name, float *temp) {
     std::shared_lock<std::shared_mutex> _lock(sensor_predictions_mutex_);
     const auto sensor_itr = predicted_sensors_.find(sensor_name.data());
     if (sensor_itr == predicted_sensors_.end()) {
         LOG(ERROR) << "sensor_name " << sensor_name << " is not registered as predicted sensor";
-        return NAN;
+        return SensorReadStatus::ERROR;
     }
 
     PredictedSensorInfo &predicted_sensor_info = predicted_sensors_[sensor_name.data()];
@@ -131,7 +131,7 @@ float ThermalPredictionsHelper::readSensor(std::string_view sensor_name) {
     if (linked_sensor_itr == predictor_sensors_.end()) {
         LOG(ERROR) << "linked_sensor_name " << predicted_sensor_info.linked_sensor
                    << " is not registered as predictor for sensor" << sensor_name;
-        return NAN;
+        return SensorReadStatus::ERROR;
     }
 
     PredictorSensorInfo predictor_sensor_info = linked_sensor_itr->second;
@@ -149,14 +149,15 @@ float ThermalPredictionsHelper::readSensor(std::string_view sensor_name) {
                 now - predictor_sensor_info.samples[index].timestamp);
         if (time_elapsed.count() <= max_time_elapsed_ms &&
             time_elapsed.count() >= min_time_elapsed_ms) {
-            return predictor_sensor_info.samples[index].values[prediction_index];
+            *temp = predictor_sensor_info.samples[index].values[prediction_index];
+            return SensorReadStatus::OKAY;
         }
 
         loop_count++;
     } while (loop_count < predictor_sensor_info.num_out_samples);
 
     LOG(INFO) << "sensor_name: " << sensor_name << " no valid prediction samples found";
-    return NAN;
+    return SensorReadStatus::UNDER_COLLECTING;
 }
 
 bool ThermalPredictionsHelper::initializePredictionSensors(
