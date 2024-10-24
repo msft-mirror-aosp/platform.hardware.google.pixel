@@ -21,17 +21,18 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
-#include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <fmq/AidlMessageQueue.h>
 #include <fmq/EventFlag.h>
 #include <perfmgr/HintManager.h>
 #include <utils/Log.h>
 
-#include <mutex>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
 #include "AdpfTypes.h"
+#include "ChannelManager.h"
 #include "PowerHintSession.h"
 #include "PowerSessionManager.h"
 #include "disp-power/DisplayLowPower.h"
@@ -47,6 +48,37 @@ using ::android::perfmgr::HintManager;
 constexpr char kPowerHalStateProp[] = "vendor.powerhal.state";
 constexpr char kPowerHalAudioProp[] = "vendor.powerhal.audio";
 constexpr char kPowerHalRenderingProp[] = "vendor.powerhal.rendering";
+
+const std::map<Mode, int32_t> kModeEarliestVersion = {
+  {Mode::DOUBLE_TAP_TO_WAKE, 1},
+  {Mode::LOW_POWER, 1},
+  {Mode::SUSTAINED_PERFORMANCE, 1},
+  {Mode::FIXED_PERFORMANCE, 1},
+  {Mode::VR, 1},
+  {Mode::LAUNCH, 1},
+  {Mode::EXPENSIVE_RENDERING, 1},
+  {Mode::INTERACTIVE, 1},
+  {Mode::DEVICE_IDLE, 1},
+  {Mode::DISPLAY_INACTIVE, 1},
+  {Mode::AUDIO_STREAMING_LOW_LATENCY, 1},
+  {Mode::CAMERA_STREAMING_SECURE, 1},
+  {Mode::CAMERA_STREAMING_LOW, 1},
+  {Mode::CAMERA_STREAMING_MID, 1},
+  {Mode::CAMERA_STREAMING_HIGH, 1},
+  {Mode::GAME, 3},
+  {Mode::GAME_LOADING, 3},
+  {Mode::DISPLAY_CHANGE, 5},
+  {Mode::AUTOMOTIVE_PROJECTION, 5},
+};
+
+const std::map<Boost, int32_t> kBoostEarliestVersion = {
+  {Boost::INTERACTION, 1},
+  {Boost::DISPLAY_UPDATE_IMMINENT, 1},
+  {Boost::ML_ACC, 1},
+  {Boost::AUDIO_LAUNCH, 1},
+  {Boost::CAMERA_LAUNCH, 1},
+  {Boost::CAMERA_SHOT, 1},
+};
 
 Power::Power(std::shared_ptr<DisplayLowPower> dlpw)
     : mDisplayLowPower(dlpw),
@@ -182,26 +214,10 @@ ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
 }
 
 ndk::ScopedAStatus Power::isModeSupported(Mode type, bool *_aidl_return) {
-    switch (mServiceVersion) {
-        case 5:
-            if (static_cast<int32_t>(type) <= static_cast<int32_t>(Mode::AUTOMOTIVE_PROJECTION))
-                break;
-            [[fallthrough]];
-        case 4:
-            [[fallthrough]];
-        case 3:
-            if (static_cast<int32_t>(type) <= static_cast<int32_t>(Mode::GAME_LOADING))
-                break;
-            [[fallthrough]];
-        case 2:
-            [[fallthrough]];
-        case 1:
-            if (static_cast<int32_t>(type) <= static_cast<int32_t>(Mode::CAMERA_STREAMING_HIGH))
-                break;
-            [[fallthrough]];
-        default:
-            *_aidl_return = false;
-            return ndk::ScopedAStatus::ok();
+    auto it = kModeEarliestVersion.find(type);
+    if (it == kModeEarliestVersion.end() || mServiceVersion < it->second) {
+        *_aidl_return = false;
+        return ndk::ScopedAStatus::ok();
     }
     bool supported = HintManager::GetInstance()->IsHintSupported(toString(type));
     // LOW_POWER handled insides PowerHAL specifically
@@ -254,22 +270,10 @@ ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
 }
 
 ndk::ScopedAStatus Power::isBoostSupported(Boost type, bool *_aidl_return) {
-    switch (mServiceVersion) {
-        case 5:
-            [[fallthrough]];
-        case 4:
-            [[fallthrough]];
-        case 3:
-            [[fallthrough]];
-        case 2:
-            [[fallthrough]];
-        case 1:
-            if (static_cast<int32_t>(type) <= static_cast<int32_t>(Boost::CAMERA_SHOT))
-                break;
-            [[fallthrough]];
-        default:
-            *_aidl_return = false;
-            return ndk::ScopedAStatus::ok();
+    auto it = kBoostEarliestVersion.find(type);
+    if (it == kBoostEarliestVersion.end() || mServiceVersion < kBoostEarliestVersion.at(type)) {
+        *_aidl_return = false;
+        return ndk::ScopedAStatus::ok();
     }
     bool supported = HintManager::GetInstance()->IsHintSupported(toString(type));
     if (!supported && HintManager::GetInstance()->IsAdpfProfileSupported(toString(type))) {
@@ -343,23 +347,16 @@ ndk::ScopedAStatus Power::createHintSessionWithConfig(
     return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus Power::getSessionChannel(int32_t, int32_t, ChannelConfig *_aidl_return) {
-    static AidlMessageQueue<ChannelMessage, SynchronizedReadWrite> stubQueue{20, true};
-    static std::thread stubThread([&] {
-        ChannelMessage data;
-        // This loop will only run while there is data waiting
-        // to be processed, and blocks on a futex all other times
-        while (stubQueue.readBlocking(&data, 1, 0)) {
-        }
-    });
-    _aidl_return->channelDescriptor = stubQueue.dupeDesc();
-    _aidl_return->readFlagBitmask = 0x01;
-    _aidl_return->writeFlagBitmask = 0x02;
-    _aidl_return->eventFlagDescriptor = std::nullopt;
-    return ndk::ScopedAStatus::ok();
+ndk::ScopedAStatus Power::getSessionChannel(int32_t tgid, int32_t uid,
+                                            ChannelConfig *_aidl_return) {
+    if (ChannelManager<>::getInstance()->getChannelConfig(tgid, uid, _aidl_return)) {
+        return ndk::ScopedAStatus::ok();
+    }
+    return ndk::ScopedAStatus::fromStatus(EX_ILLEGAL_STATE);
 }
 
-ndk::ScopedAStatus Power::closeSessionChannel(int32_t, int32_t) {
+ndk::ScopedAStatus Power::closeSessionChannel(int32_t tgid, int32_t uid) {
+    ChannelManager<>::getInstance()->closeChannel(tgid, uid);
     return ndk::ScopedAStatus::ok();
 }
 
