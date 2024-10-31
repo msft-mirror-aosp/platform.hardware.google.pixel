@@ -161,6 +161,7 @@ class SysfsCollector {
     void logOffloadEffectsStats(const std::shared_ptr<IStats> &stats_client);
     void logBluetoothAudioUsage(const std::shared_ptr<IStats> &stats_client);
     void logBatteryGMSR(const std::shared_ptr<IStats> &stats_client);
+    void logDmVerityPartitionReadAmount(const std::shared_ptr<IStats> &stats_client);
     void logBatteryHistoryValidation();
 
     const char *const kSlowioReadCntPath;
