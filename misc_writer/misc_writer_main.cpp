@@ -240,10 +240,6 @@ int main(int argc, char** argv) {
       misc_writer = std::make_unique<MiscWriter>(iter->second);
     } else if (option_name == "set-dsttransition"s) {
       long long int dst_transition = strtoll(optarg, NULL, 10);
-      if (0 == dst_transition) {
-        LOG(ERROR) << "Failed to parse the dst transition:" << optarg;
-        return Usage(argv[0]);
-      }
       if (misc_writer) {
         LOG(ERROR) << "Misc writer action has already been set";
         return Usage(argv[0]);
@@ -270,8 +266,8 @@ int main(int argc, char** argv) {
       if (misc_writer) {
         LOG(ERROR) << "Misc writer action has already been set";
         return Usage(argv[0]);
-      } else if (sizeof(argv[2]) >= 2000) {
-        std::cerr << "String is too large, we only take strings smaller than 2000, but you provide " << sizeof(argv[2]);
+      } else if (sizeof(argv[2]) >= 32) {
+        std::cerr << "String is too large, we only take strings smaller than 32, but you provide " << sizeof(argv[2]);
         return Usage(argv[0]);
       }
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, argv[2]);
