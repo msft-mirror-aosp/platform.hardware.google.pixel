@@ -75,7 +75,7 @@ cc_test {
         "tests/HintManagerTest.cc",
         "tests/EventNodeTest.cc",
     ],
-    test_suites: ["device-tests"],
+    test_suites: ["device-pixel-tests"],
     require_root: true,
 }
 
