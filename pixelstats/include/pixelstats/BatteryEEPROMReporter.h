@@ -30,10 +30,6 @@ namespace pixel {
 using aidl::android::frameworks::stats::IStats;
 using aidl::android::frameworks::stats::VendorAtomValue;
 
-// New history layout total size is 924 or 900 byte
-// each history data size is 12 bytes: 900/12=75
-#define BATT_HIST_NUM_MAX 75
-
 /**
  * A class to upload battery EEPROM metrics
  */

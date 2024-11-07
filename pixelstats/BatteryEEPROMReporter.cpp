@@ -93,7 +93,8 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     }
 
     const int kHistTotalLen = file_contents.size();
-    ALOGD("kHistTotalLen=%d\n", kHistTotalLen);
+    const int kHistTotalNum = kHistTotalLen / LINESIZE;
+    ALOGD("kHistTotalLen=%d, kHistTotalNum=%d\n", kHistTotalLen, kHistTotalNum);
 
     if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
         int cnt;
@@ -101,8 +102,8 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         cycle_count = android::base::Trim(cycle_count);
         if (android::base::ParseInt(cycle_count, &cnt)) {
             cnt /= 10;
-            if (cnt > BATT_HIST_NUM_MAX)
-                sparse_index_count = cnt % BATT_HIST_NUM_MAX;
+            if (cnt > kHistTotalNum)
+                sparse_index_count = cnt % kHistTotalNum;
         }
 
         ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
@@ -111,20 +112,22 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
 
     struct BatteryHistoryRawFormat hist_raw;
     struct BatteryHistory hist;
-    int16_t i, num;
+    int16_t i;
 
     ReadFileToInt(kBatteryPairingPath, &hist.battery_pairing);
 
-    for (i = 0; i < BATT_HIST_NUM_MAX; i++) {
+    for (i = 0; i < kHistTotalNum; i++) {
         size_t history_offset = i * LINESIZE;
-        if (history_offset > file_contents.size())
+        if (history_offset + LINESIZE > kHistTotalLen)
             break;
         history_each = file_contents.substr(history_offset, LINESIZE);
         unsigned int data[4];
 
         /* Format transfer: go/gsx01-eeprom */
-        num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%x %x %x %x",
-                     &hist_raw.tempco, &hist_raw.rcomp0, &data[0], &data[1], &data[2], &data[3]);
+        int16_t num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%x %x %x %x",
+                      &hist_raw.tempco, &hist_raw.rcomp0, &data[0], &data[1], &data[2], &data[3]);
+        if (num <= 0)
+            continue;
 
         if (hist_raw.tempco == 0xFFFF && hist_raw.rcomp0 == 0xFFFF)
             continue;
