@@ -123,6 +123,7 @@ void ChannelGroup<PowerSessionManagerT, PowerHintSessionT>::runChannelGroup() {
     std::vector<android::hardware::power::WorkDuration> durations;
     durations.reserve(kFMQQueueSize);
     messages.reserve(kFMQQueueSize);
+
     while (!mDestructing) {
         messages.clear();
         flag->wait(kWriteBits, &flagState, 0, true);
@@ -139,10 +140,10 @@ void ChannelGroup<PowerSessionManagerT, PowerHintSessionT>::runChannelGroup() {
                 // Drop the lowest set write bit
                 flagState &= (flagState - 1);
                 auto &channel = mChannels[channelNum];
-                if (blocklist.contains(channel->getUid())) {
+                if (!channel || !channel->isValid()) {
                     continue;
                 }
-                if (!channel || !channel->isValid()) {
+                if (blocklist.contains(channel->getUid())) {
                     continue;
                 }
                 int toRead = channel->getQueue()->availableToRead();
@@ -155,6 +156,7 @@ void ChannelGroup<PowerSessionManagerT, PowerHintSessionT>::runChannelGroup() {
                     blocklist.insert(channel->getUid());
                     continue;
                 }
+                flag->wake(mChannels[channelNum]->getReadBitmask());
                 for (int messageIndex = 0; messageIndex < messages.size() && !mDestructing;
                      ++messageIndex) {
                     ChannelMessage &message = messages[messageIndex];
