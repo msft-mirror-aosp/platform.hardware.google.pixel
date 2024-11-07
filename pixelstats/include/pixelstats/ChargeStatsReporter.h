@@ -56,6 +56,10 @@ class ChargeStatsReporter {
     // -2.
     const int kVendorAtomOffset = 2;
 
+    const int kNumChgStatsFormat00Fields = 7;   // "%d,%d,%d, %d,%d,%d,%d"
+    const int kNumChgStatsFormat01Fields = 8;   // "%d,%d,%d, %d,%d,%d,%d %d" AACR
+    const int kNumChgStatsFormat02Fields = 10;  // "%d,%d,%d, %d,%d,%d,%d %d %d,%d" AACR + CSI
+
     const std::string kThermalChargeMetricsPath =
             "/sys/devices/platform/google,charger/thermal_stats";
 
