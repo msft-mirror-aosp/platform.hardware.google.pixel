@@ -70,9 +70,10 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             ChargeStats::kAdapterCapabilities4FieldNumber,
             ChargeStats::kReceiverState0FieldNumber,
             ChargeStats::kReceiverState1FieldNumber,
+            ChargeStats::kAacrAlgoFieldNumber,
     };
     const int32_t chg_fields_size = std::size(charge_stats_fields);
-    static_assert(chg_fields_size == 17, "Unexpected charge stats fields size");
+    static_assert(chg_fields_size == 18, "Unexpected charge stats fields size");
     const int32_t wlc_fields_size = 7;
     std::vector<VendorAtomValue> values(chg_fields_size);
     VendorAtomValue val;
@@ -138,6 +139,11 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
                 break;
             }
         }
+    }
+
+    if (ReadFileToString(kGAacrAlgoPath.c_str(), &file_contents)) {
+        ss.str(file_contents);
+        ss >> tmp[17];
     }
 
     for (i = 0; i < chg_fields_size; i++) {
