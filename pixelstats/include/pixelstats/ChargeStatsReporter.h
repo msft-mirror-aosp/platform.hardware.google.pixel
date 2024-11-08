@@ -66,6 +66,8 @@ class ChargeStatsReporter {
     const std::string kGChargerMetricsPath = "/sys/devices/platform/google,charger/charge_stats";
 
     const std::string kGDualBattMetricsPath = "/sys/class/power_supply/dualbatt/dbatt_stats";
+
+    const std::string kGAacrAlgoPath = "/sys/class/power_supply/battery/aacr_algo";
 };
 
 }  // namespace pixel
