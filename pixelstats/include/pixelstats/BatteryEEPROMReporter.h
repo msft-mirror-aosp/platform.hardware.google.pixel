@@ -30,15 +30,6 @@ namespace pixel {
 using aidl::android::frameworks::stats::IStats;
 using aidl::android::frameworks::stats::VendorAtomValue;
 
-// The storage for save whole history is 928 byte
-// each history contains 19 items with total size 28 byte
-// hence the history number is 928/28~33
-#define BATT_HIST_NUM_MAX 33
-
-// New history layout total size is 924 or 900 byte
-// each history data size is 12 bytes: 900/12=75
-#define BATT_HIST_NUM_MAX_V2 75
-
 /**
  * A class to upload battery EEPROM metrics
  */
@@ -121,8 +112,6 @@ class BatteryEEPROMReporter {
         /* The battery pairing state */
         int16_t battery_pairing;
     };
-    /* The number of elements in struct BatteryHistory for P20 series */
-    const int kNumBatteryHistoryFields = 19;
     /* The number of elements for relaxation event */
     const int kNumFGLearningFieldsV2 = 16;
     /* with additional unix time field */
@@ -133,7 +122,7 @@ class BatteryEEPROMReporter {
     unsigned int last_hv_check_ = 0;
 
     /* P21+ history format */
-    struct BatteryHistoryExtend {
+    struct BatteryHistoryRawFormat {
         uint16_t tempco;
         uint16_t rcomp0;
         uint8_t timer_h;
