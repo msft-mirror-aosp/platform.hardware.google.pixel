@@ -140,6 +140,7 @@ message Atom {
       VendorAudioUsbConnectionState vendor_audio_usb_connection_state = 105086 [(android.os.statsd.module) = "pixelaudio"];
       VendorAudioSpeakerPowerStatsReported vendor_audio_speaker_power_stats_reported = 105087 [(android.os.statsd.module) = "pixelaudio"];
       DmVerityPartitionReadAmountReported dm_verity_partition_read_amount_reported = 105088;
+      WaterEventReported water_event_reported = 105089;
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -3112,4 +3113,68 @@ message DmVerityPartitionReadAmountReported {
   optional DmPartition dm_partition = 2;
   /* Number of sectors read from the dm-verity protected partition. */
   optional int64 read_sectors = 3;
+}
+
+/*
+ * Event showing the state of the sensor when a Water Intrusion Event occurs
+ */
+message WaterEventReported {
+  enum FuseState {
+    FUSE_STATE_UNKNOWN = 0;
+    INTACT = 1; /* fuse has not blown */
+    BLOWN = 2;   /* fuse has blown */
+  }
+  enum EventPoint {
+    EVENT_POINT_UNKNOWN = 0;
+    BOOT = 1;
+    IRQ = 2;
+  }
+  enum SensorState {
+    SENSOR_STATE_UNKNOWN = 0;
+    WET = 1;
+    DRY = 2;
+    INVALID = 3;
+    DISABLED = 4;
+  }
+
+  enum CircuitState {
+    CIRCUIT_ENABLED_UNKNOWN = 0;
+    CIRCUIT_ENABLED = 1;
+    CIRCUIT_DISABLED = 2;
+  }
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  /*
+   * Event details
+   */
+  /* The lifecycle point at which event was collected */
+  optional EventPoint collection_event = 13;
+
+  /* state of the intrusion detection fuse */
+  optional FuseState fuse_state = 2;
+  /* Was the fuse enabled */
+  optional CircuitState fuse_enabled = 3;
+
+  /* The state of the reference sensor. */
+  optional SensorState reference_state = 4;
+  /* The threshold of the reference in mV. */
+  optional int32 reference_threshold = 8;
+
+  /* The state of sensor 0. */
+  optional SensorState sensor0_state = 5;
+  /* The threshold of sensor 0 in mV. */
+  repeated int32 sensor0_threshold = 9;
+
+  /* The state of sensor 1. */
+  optional SensorState sensor1_state = 6;
+  /* The threshold of sensor1 in mv. */
+  repeated int32 sensor1_threshold = 10;
+
+   /* The state of sensor 2. */
+  optional SensorState sensor2_state = 7;
+  /* The threshold of the sensor 2 in mv. */
+  repeated int32 sensor2_threshold = 11;
+
+  /* Was system fault enabled */
+  optional CircuitState fault_enabled = 12;
 }
