@@ -41,9 +41,9 @@ class Power : public ::aidl::android::hardware::power::BnPower {
     ndk::ScopedAStatus setBoost(Boost type, int32_t durationMs) override;
     ndk::ScopedAStatus isBoostSupported(Boost type, bool *_aidl_return) override;
     ndk::ScopedAStatus getCpuHeadroom(const CpuHeadroomParams &in_params,
-                                      std::vector<float> *_aidl_return) override;
+                                      CpuHeadroomResult *_aidl_return) override;
     ndk::ScopedAStatus getGpuHeadroom(const GpuHeadroomParams &in_params,
-                                      float *_aidl_return) override;
+                                      GpuHeadroomResult *_aidl_return) override;
     ndk::ScopedAStatus getCpuHeadroomMinIntervalMillis(int64_t *_aidl_return) override;
     ndk::ScopedAStatus getGpuHeadroomMinIntervalMillis(int64_t *_aidl_return) override;
     ndk::ScopedAStatus createHintSession(int32_t tgid, int32_t uid,
@@ -60,6 +60,8 @@ class Power : public ::aidl::android::hardware::power::BnPower {
     ndk::ScopedAStatus closeSessionChannel(int32_t tgid, int32_t uid) override;
     ndk::ScopedAStatus getSupportInfo(SupportInfo *_aidl_return);
     binder_status_t dump(int fd, const char **args, uint32_t numArgs) override;
+    ndk::ScopedAStatus sendCompositionData(const std::vector<CompositionData> &in_data) override;
+    ndk::ScopedAStatus sendCompositionUpdate(const CompositionUpdate &in_update) override;
 
   private:
     void initSupportStatus();
