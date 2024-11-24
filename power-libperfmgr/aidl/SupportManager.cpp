@@ -81,6 +81,9 @@ constexpr SupportList<SessionHint> kSessionHintEarliestVersion = {
 
 constexpr SupportList<SessionMode> kSessionModeEarliestVersion = {
   {SessionMode::POWER_EFFICIENCY, 5},
+  {SessionMode::GRAPHICS_PIPELINE, 6},
+  {SessionMode::AUTO_CPU, 6},
+  {SessionMode::AUTO_GPU, 6},
 };
 
 constexpr SupportList<SessionTag> kSessionTagEarliestVersion {
@@ -146,6 +149,13 @@ SupportInfo SupportManager::makeSupportInfo() {
     out.sessionModes = static_cast<int64_t>(sessionModeBits.to_ullong());
     out.sessionTags = static_cast<int64_t>(sessionTagBits.to_ullong());
 
+    out.compositionData = {
+            .isSupported = false,
+            .disableGpuFences = false,
+            .maxBatchSize = 1,
+            .alwaysBatch = false,
+    };
+
     return out;
 }
 
@@ -197,6 +207,8 @@ bool SupportManager::sessionModeSupported(SessionMode type) {
     }
     switch (type) {
         case SessionMode::POWER_EFFICIENCY:
+            return false;
+        case SessionMode::GRAPHICS_PIPELINE:
             return false;
         default:
             return true;
