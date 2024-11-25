@@ -140,6 +140,7 @@ message Atom {
       VendorAudioUsbConnectionState vendor_audio_usb_connection_state = 105086 [(android.os.statsd.module) = "pixelaudio"];
       VendorAudioSpeakerPowerStatsReported vendor_audio_speaker_power_stats_reported = 105087 [(android.os.statsd.module) = "pixelaudio"];
       DmVerityPartitionReadAmountReported dm_verity_partition_read_amount_reported = 105088;
+      WaterEventReported water_event_reported = 105089;
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -238,6 +239,8 @@ message ChargeStats {
     /* Charging Speed Indicator(CSI) status and type */
     optional int32 csi_aggregate_status = 17;
     optional int32 csi_aggregate_type = 18;
+
+    optional int32 aacr_algo = 19;
 }
 
 /* A message containing stats from each charge voltage tier. */
@@ -1721,6 +1724,92 @@ message BrownoutDetected {
     optional int32 mitigation_method_0_count = 47;
     // Mitigation Method 0 Entry Time
     optional int64 mitigation_method_0_time_us = 48;
+    // pre ocp cpu1 backup at brownout
+    optional int32 pre_ocp_cpu1_bckup = 49;
+    // pre ocp cpu2 backup at brownout
+    optional int32 pre_ocp_cpu2_bckup = 50;
+    // pre ocp tpu backup at brownout
+    optional int32 pre_ocp_tpu_bckup = 51;
+    // pre ocp gpu backup at brownout
+    optional int32 pre_ocp_gpu_bckup = 52;
+    // pre uvlo hit count for m pmic at brownout
+    optional int32 pre_uvlo_hit_cnt_m = 53;
+    // pre uvlo hit count for s pmic at brownout
+    optional int32 pre_uvlo_hit_cnt_s = 54;
+    // pre uvlo assertion duration at brownout
+    optional int32 pre_uvlo_dur = 55;
+    // odpm irq stat 0 main at brownout
+    optional int32 odpm_irq_stat_0_sys_evt_main_bckup = 56;
+    // odpm irq stat 1 main at brownout
+    optional int32 odpm_irq_stat_1_sys_evt_main_bckup = 57;
+    // odpm irq stat 2 main at brownout
+    optional int32 odpm_irq_stat_2_sys_evt_main_bckup = 58;
+    // odpm irq stat 3 main at brownout
+    optional int32 odpm_irq_stat_3_sys_evt_main_bckup = 59;
+    // odpm irq stat 4 main at brownout
+    optional int32 odpm_irq_stat_4_sys_evt_main_bckup = 60;
+    // odpm irq stat 5 main at brownout
+    optional int32 odpm_irq_stat_5_sys_evt_main_bckup = 61;
+    // odpm irq stat 6 main at brownout
+    optional int32 odpm_irq_stat_6_sys_evt_main_bckup = 62;
+    // odpm irq stat 7 main at brownout
+    optional int32 odpm_irq_stat_7_sys_evt_main_bckup = 63;
+    // odpm irq stat 8 main at brownout
+    optional int32 odpm_irq_stat_8_sys_evt_main_bckup = 64;
+    // odpm irq stat 9 main at brownout
+    optional int32 odpm_irq_stat_9_sys_evt_main_bckup = 65;
+    // odpm irq stat 10 main at brownout
+    optional int32 odpm_irq_stat_10_sys_evt_main_bckup = 66;
+    // odpm irq stat 11 main at brownout
+    optional int32 odpm_irq_stat_11_sys_evt_main_bckup = 67;
+    // odpm irq stat 0 sub at brownout
+    optional int32 odpm_irq_stat_0_sys_evt_sub_bckup = 68;
+    // odpm irq stat 1 sub at brownout
+    optional int32 odpm_irq_stat_1_sys_evt_sub_bckup = 69;
+    // odpm irq stat 2 sub at brownout
+    optional int32 odpm_irq_stat_2_sys_evt_sub_bckup = 70;
+    // odpm irq stat 3 sub at brownout
+    optional int32 odpm_irq_stat_3_sys_evt_sub_bckup = 71;
+    // odpm irq stat 4 sub at brownout
+    optional int32 odpm_irq_stat_4_sys_evt_sub_bckup = 72;
+    // odpm irq stat 5 sub at brownout
+    optional int32 odpm_irq_stat_5_sys_evt_sub_bckup = 73;
+    // odpm irq stat 6 sub at brownout
+    optional int32 odpm_irq_stat_6_sys_evt_sub_bckup = 74;
+    // odpm irq stat 7 sub at brownout
+    optional int32 odpm_irq_stat_7_sys_evt_sub_bckup = 75;
+    // odpm irq stat 8 sub at brownout
+    optional int32 odpm_irq_stat_8_sys_evt_sub_bckup = 76;
+    // odpm irq stat 9 sub at brownout
+    optional int32 odpm_irq_stat_9_sys_evt_sub_bckup = 77;
+    // odpm irq stat 10 sub at brownout
+    optional int32 odpm_irq_stat_10_sys_evt_sub_bckup = 78;
+    // odpm irq stat 11 sub at brownout
+    optional int32 odpm_irq_stat_11_sys_evt_sub_bckup = 79;
+    // odpm irq stat ext 0 main at brownout
+    optional int32 odpm_irq_stat_ext_0_sys_evt_main_bckup = 80;
+    // odpm irq stat ext 1 main at brownout
+    optional int32 odpm_irq_stat_ext_1_sys_evt_main_bckup = 81;
+    // odpm irq stat ext 2 main at brownout
+    optional int32 odpm_irq_stat_ext_2_sys_evt_main_bckup = 82;
+    // odpm irq stat ext 3 main at brownout
+    optional int32 odpm_irq_stat_ext_3_sys_evt_main_bckup = 83;
+    // odpm irq stat ext 0 sub at brownout
+    optional int32 odpm_irq_stat_ext_0_sys_evt_sub_bckup = 84;
+    // odpm irq stat ext 1 sub at brownout
+    optional int32 odpm_irq_stat_ext_1_sys_evt_sub_bckup = 85;
+    // odpm irq stat ext 2 sub at brownout
+    optional int32 odpm_irq_stat_ext_2_sys_evt_sub_bckup = 86;
+    // odpm irq stat ext 3 sub at brownout
+    optional int32 odpm_irq_stat_ext_3_sys_evt_sub_bckup = 87;
+    // odpm irq stat gpu at brownout
+    optional int32 odpm_irq_stat_gpu_bckup = 88;
+    // odpm irq stat tpu at brownout
+    optional int32 odpm_irq_stat_tpu_bckup = 89;
+    // odpm irq stat cpu1 at brownout
+    optional int32 odpm_irq_stat_cpu1_bckup = 90;
+    // odpm irq stat cpu2 at brownout
+    optional int32 odpm_irq_stat_cpu2_bckup = 91;
 }
 
 /*
@@ -3024,4 +3113,68 @@ message DmVerityPartitionReadAmountReported {
   optional DmPartition dm_partition = 2;
   /* Number of sectors read from the dm-verity protected partition. */
   optional int64 read_sectors = 3;
+}
+
+/*
+ * Event showing the state of the sensor when a Water Intrusion Event occurs
+ */
+message WaterEventReported {
+  enum FuseState {
+    FUSE_STATE_UNKNOWN = 0;
+    INTACT = 1; /* fuse has not blown */
+    BLOWN = 2;   /* fuse has blown */
+  }
+  enum EventPoint {
+    EVENT_POINT_UNKNOWN = 0;
+    BOOT = 1;
+    IRQ = 2;
+  }
+  enum SensorState {
+    SENSOR_STATE_UNKNOWN = 0;
+    WET = 1;
+    DRY = 2;
+    INVALID = 3;
+    DISABLED = 4;
+  }
+
+  enum CircuitState {
+    CIRCUIT_ENABLED_UNKNOWN = 0;
+    CIRCUIT_ENABLED = 1;
+    CIRCUIT_DISABLED = 2;
+  }
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  /*
+   * Event details
+   */
+  /* The lifecycle point at which event was collected */
+  optional EventPoint collection_event = 13;
+
+  /* state of the intrusion detection fuse */
+  optional FuseState fuse_state = 2;
+  /* Was the fuse enabled */
+  optional CircuitState fuse_enabled = 3;
+
+  /* The state of the reference sensor. */
+  optional SensorState reference_state = 4;
+  /* The threshold of the reference in mV. */
+  optional int32 reference_threshold = 8;
+
+  /* The state of sensor 0. */
+  optional SensorState sensor0_state = 5;
+  /* The threshold of sensor 0 in mV. */
+  repeated int32 sensor0_threshold = 9;
+
+  /* The state of sensor 1. */
+  optional SensorState sensor1_state = 6;
+  /* The threshold of sensor1 in mv. */
+  repeated int32 sensor1_threshold = 10;
+
+   /* The state of sensor 2. */
+  optional SensorState sensor2_state = 7;
+  /* The threshold of the sensor 2 in mv. */
+  repeated int32 sensor2_threshold = 11;
+
+  /* Was system fault enabled */
+  optional CircuitState fault_enabled = 12;
 }
