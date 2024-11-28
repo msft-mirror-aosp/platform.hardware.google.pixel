@@ -93,7 +93,10 @@ cc_test {
         "pixel-power-ext-V1-ndk",
         "libfmq",
     ],
-    test_suites: ["device-tests"],
+    test_suites: [
+        "device-tests",
+        "device-pixel-tests",
+    ],
 }
 
 cc_binary {
@@ -134,6 +137,7 @@ cc_binary {
         "aidl/PowerExt.cpp",
         "aidl/PowerHintSession.cpp",
         "aidl/PowerSessionManager.cpp",
+        "aidl/SupportManager.cpp",
         "aidl/UClampVoter.cpp",
         "aidl/SessionRecords.cpp",
         "aidl/SessionChannel.cpp",

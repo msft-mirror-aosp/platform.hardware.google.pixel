@@ -83,6 +83,7 @@ using android::hardware::google::pixel::PixelAtoms::VendorSpeakerImpedance;
 using android::hardware::google::pixel::PixelAtoms::VendorSpeakerStatsReported;
 using android::hardware::google::pixel::PixelAtoms::VendorSpeechDspStat;
 using android::hardware::google::pixel::PixelAtoms::VendorTempResidencyStats;
+using android::hardware::google::pixel::PixelAtoms::WaterEventReported;
 using android::hardware::google::pixel::PixelAtoms::ZramBdStat;
 using android::hardware::google::pixel::PixelAtoms::ZramMmStat;
 
@@ -144,7 +145,8 @@ SysfsCollector::SysfsCollector(const struct SysfsPaths &sysfs_paths)
       kMaxfgHistoryPath("/dev/maxfg_history"),
       kFGModelLoadingPath(sysfs_paths.FGModelLoadingPath),
       kFGLogBufferPath(sysfs_paths.FGLogBufferPath),
-      kSpeakerVersionPath(sysfs_paths.SpeakerVersionPath) {}
+      kSpeakerVersionPath(sysfs_paths.SpeakerVersionPath),
+      kWaterEventPath(sysfs_paths.WaterEventPath){}
 
 bool SysfsCollector::ReadFileToInt(const std::string &path, int *val) {
     return ReadFileToInt(path.c_str(), val);
@@ -2271,8 +2273,22 @@ void SysfsCollector::logBrownout() {
                                                 kBrownoutReasonProp);
 }
 
+void SysfsCollector::logWater() {
+    const std::shared_ptr<IStats> stats_client = getStatsService();
+    if (!stats_client) {
+        ALOGE("Unable to get AIDL Stats service");
+        return;
+    }
+    if (kWaterEventPath == nullptr || strlen(kWaterEventPath) == 0)
+        return;
+    PixelAtoms::WaterEventReported::EventPoint event_point =
+            PixelAtoms::WaterEventReported::EventPoint::WaterEventReported_EventPoint_BOOT;
+    water_event_reporter_.logEvent(stats_client, event_point, kWaterEventPath);
+}
+
 void SysfsCollector::logOnce() {
     logBrownout();
+    logWater();
 }
 
 void SysfsCollector::logPerHour() {
