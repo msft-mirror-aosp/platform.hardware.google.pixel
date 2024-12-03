@@ -154,9 +154,7 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kChargeStats,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report ChargeStats to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void ChargeStatsReporter::ReportVoltageTierStats(const std::shared_ptr<IStats> &stats_client,
@@ -223,9 +221,7 @@ void ChargeStatsReporter::ReportVoltageTierStats(const std::shared_ptr<IStats> &
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kVoltageTierStats,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report VoltageTierStats to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 /**
