@@ -457,7 +457,7 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
                                     .checksum = EvtModelLoading, };
     std::string file_contents;
     std::string path;
-    int num, pos = 0;
+    int num;
     const char *data;
 
     if (paths.empty())
@@ -481,15 +481,12 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
 
     data = file_contents.c_str();
 
-    num = sscanf(&data[pos],  "ModelNextUpdate: %" SCNu16 "\n"
-                 "%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%n",
-                 &params.rslow, &pos);
-    if (num != 1) {
+    num = sscanf(data, "ModelNextUpdate: %" SCNu16 "%*[0-9a-f: \n]ATT: %" SCNu16 " FAIL: %" SCNu16,
+                 &params.rslow, &params.full_cap, &params.esr);
+    if (num != 3) {
         ALOGE("Couldn't process ModelLoading History. num=%d\n", num);
         return;
-    }
-
-    sscanf(&data[pos],  "ATT: %" SCNu16 " FAIL: %" SCNu16, &params.full_cap, &params.esr);
+     }
 
     /* don't need to report when attempts counter is zero */
     if (params.full_cap == 0)
