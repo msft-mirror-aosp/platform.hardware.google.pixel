@@ -40,9 +40,7 @@ using android::hardware::google::pixel::PixelAtoms::ChargeStats;
 using android::hardware::google::pixel::PixelAtoms::VoltageTierStats;
 
 #define DURATION_FILTER_SECS 15
-#define CHG_STATS_FMT0 "%d,%d,%d, %d,%d,%d,%d"
-#define CHG_STATS_FMT1 "%d,%d,%d, %d,%d,%d,%d %d" /* AACR */
-#define CHG_STATS_FMT2 "%d,%d,%d, %d,%d,%d,%d %d %d,%d" /* AACR + CSI */
+#define CHG_STATS_FMT "%d,%d,%d, %d,%d,%d,%d %d %d,%d"
 
 ChargeStatsReporter::ChargeStatsReporter() {}
 
@@ -72,35 +70,26 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             ChargeStats::kAdapterCapabilities4FieldNumber,
             ChargeStats::kReceiverState0FieldNumber,
             ChargeStats::kReceiverState1FieldNumber,
+            ChargeStats::kAacrAlgoFieldNumber,
     };
     const int32_t chg_fields_size = std::size(charge_stats_fields);
-    static_assert(chg_fields_size == 17, "Unexpected charge stats fields size");
+    static_assert(chg_fields_size == 18, "Unexpected charge stats fields size");
     const int32_t wlc_fields_size = 7;
     std::vector<VendorAtomValue> values(chg_fields_size);
     VendorAtomValue val;
-    int32_t i = 0, tmp[chg_fields_size] = {0}, fields_size = (chg_fields_size - wlc_fields_size);
-    int32_t pca_ac[2] = {0}, pca_rs[5] = {0};
+    int32_t i = 0, tmp[chg_fields_size] = {0};
+    int32_t pca_ac[2] = {0}, pca_rs[5] = {0}, stats_size;
     std::string pdo_line, file_contents;
     std::istringstream ss;
 
     ALOGD("processing %s", line.c_str());
-    if (sscanf(line.c_str(), CHG_STATS_FMT2, &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5],
-               &tmp[6], &tmp[7], &tmp[8], &tmp[9]) == 10) {
-        /*
-         * Charging Speed Indicator (CSI) the sum of the reasons that limit the charging speed in
-         * this charging session.
-         */
-    } else if (sscanf(line.c_str(), CHG_STATS_FMT1, &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4],
-               &tmp[5], &tmp[6], &tmp[7]) == 8) {
-        /*
-         * Age Adjusted Charge Rate (AACR) logs an additional battery capacity in order to determine
-         * the charge curve needed to minimize battery cycle life degradation, while also minimizing
-         * impact to the user.
-         */
-    } else if (sscanf(line.c_str(), CHG_STATS_FMT0, &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4],
-                      &tmp[5], &tmp[6]) != 7) {
-        ALOGE("Couldn't process %s", line.c_str());
-        return;
+
+    stats_size = sscanf(line.c_str(), CHG_STATS_FMT, &tmp[0], &tmp[1], &tmp[2], &tmp[3],
+                        &tmp[4], &tmp[5], &tmp[6], &tmp[7], &tmp[8], &tmp[9]);
+    if (stats_size != kNumChgStatsFormat00Fields && stats_size != kNumChgStatsFormat01Fields &&
+        stats_size != kNumChgStatsFormat02Fields) {
+            ALOGE("Couldn't process %s (stats_size: %d)", line.c_str(), stats_size);
+            return;
     }
 
     if (!wline_at.empty()) {
@@ -114,8 +103,6 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             if (sscanf(wline_ac.c_str(), "D:%x,%x,%x,%x,%x, %x,%x", &tmp[10], &tmp[11], &tmp[12],
                        &tmp[13], &tmp[14], &tmp[15], &tmp[16]) != 7)
                 ALOGE("Couldn't process %s", wline_ac.c_str());
-            else
-                fields_size = chg_fields_size; /* include wlc stats */
         }
     }
 
@@ -125,7 +112,6 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
                    &pca_rs[1], &pca_rs[2], &pca_rs[3], &pca_rs[4]) != 7) {
             ALOGE("Couldn't process %s", pca_line.c_str());
         } else {
-            fields_size = chg_fields_size; /* include pca stats */
             tmp[12] = pca_rs[2];
             tmp[13] = pca_rs[3];
             tmp[14] = pca_rs[4];
@@ -155,7 +141,12 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
         }
     }
 
-    for (i = 0; i < fields_size; i++) {
+    if (ReadFileToString(kGAacrAlgoPath.c_str(), &file_contents)) {
+        ss.str(file_contents);
+        ss >> tmp[17];
+    }
+
+    for (i = 0; i < chg_fields_size; i++) {
         val.set<VendorAtomValue::intValue>(tmp[i]);
         values[charge_stats_fields[i] - kVendorAtomOffset] = val;
     }
