@@ -3093,8 +3093,11 @@ message MediaPlaybackUsageStatsReported {
   /* Device screen is on or off */
   optional bool is_screen_on = 9;
 
-  /* Device screen is on or off */
+  /* Volume of the playback */
   optional float volume = 10;
+
+  /* Average power in milliwatts. -1 if unavailable. */
+  optional float average_power = 11;
 }
 
 /*
