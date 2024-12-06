@@ -201,7 +201,7 @@ PowerHintSession<HintManagerT, PowerSessionManagerT>::PowerHintSession(
     }
 
     mLastUpdatedTime = std::chrono::steady_clock::now();
-    mPSManager->addPowerSession(mIdString, mDescriptor, mAppDescriptorTrace, threadIds);
+    mPSManager->addPowerSession(mIdString, mDescriptor, mAppDescriptorTrace, threadIds, mProcTag);
     // init boost
     auto adpfConfig = getAdpfProfile();
     mPSManager->voteSet(
@@ -274,7 +274,7 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::pause()
     if (!mDescriptor->is_active.load())
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     // Reset to default uclamp value.
-    mPSManager->setThreadsFromPowerSession(mSessionId, {});
+    mPSManager->setThreadsFromPowerSession(mSessionId, {}, mProcTag);
     mDescriptor->is_active.store(false);
     mPSManager->pause(mSessionId);
     ATRACE_INT(mAppDescriptorTrace->trace_active.c_str(), false);
@@ -292,7 +292,7 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::resume(
     if (mDescriptor->is_active.load()) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     }
-    mPSManager->setThreadsFromPowerSession(mSessionId, mDescriptor->thread_ids);
+    mPSManager->setThreadsFromPowerSession(mSessionId, mDescriptor->thread_ids, mProcTag);
     mDescriptor->is_active.store(true);
     // resume boost
     mPSManager->resume(mSessionId);
@@ -309,7 +309,7 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::close()
     }
     mSessionClosed = true;
     // Remove the session from PowerSessionManager first to avoid racing.
-    mPSManager->removePowerSession(mSessionId);
+    mPSManager->removePowerSession(mSessionId, mProcTag);
     mDescriptor->is_active.store(false);
 
     if (mProcTag != ProcessTag::DEFAULT) {
@@ -414,6 +414,12 @@ void PowerHintSession<HintManagerT, PowerSessionManagerT>::updateHeuristicBoost(
     ATRACE_INT(mAppDescriptorTrace->trace_avg_duration.c_str(), avgDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_max_duration.c_str(), maxDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_low_frame_rate.c_str(), isLowFPS);
+    if (mSessTag == SessionTag::SURFACEFLINGER) {
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps.c_str(),
+                   mSessionRecords->getLatestFPS());
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps_jitters.c_str(),
+                   mSessionRecords->getNumOfFPSJitters());
+    }
 }
 
 template <class HintManagerT, class PowerSessionManagerT>
@@ -467,7 +473,9 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::reportA
             adpfConfig->mHeuristicBoostOn.has_value() && adpfConfig->mHeuristicBoostOn.value();
 
     if (hboostEnabled) {
-        mSessionRecords->addReportedDurations(actualDurations, mDescriptor->targetNs.count());
+        mSessionRecords->addReportedDurations(
+                actualDurations, mDescriptor->targetNs.count(),
+                mSessTag == SessionTag::SURFACEFLINGER && mPSManager->getGameModeEnableState());
         mPSManager->updateHboostStatistics(mSessionId, mJankyLevel, actualDurations.size());
         updateHeuristicBoost();
     }
@@ -596,6 +604,12 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::sendHin
             case SessionHint::GPU_LOAD_RESET:
                 // TODO(kevindubois): add impl
                 break;
+            case SessionHint::CPU_LOAD_SPIKE:
+                // TODO(mattbuckley): add impl
+                break;
+            case SessionHint::GPU_LOAD_SPIKE:
+                // TODO(kevindubois): add impl
+                break;
             default:
                 ALOGE("Error: hint is invalid");
                 return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
@@ -645,7 +659,7 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::setThre
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
     }
     mDescriptor->thread_ids = threadIds;
-    mPSManager->setThreadsFromPowerSession(mSessionId, threadIds);
+    mPSManager->setThreadsFromPowerSession(mSessionId, threadIds, mProcTag);
     // init boost
     updatePidControlVariable(getAdpfProfile()->mUclampMinInit);
     return ndk::ScopedAStatus::ok();
