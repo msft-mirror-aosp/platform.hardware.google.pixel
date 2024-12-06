@@ -335,12 +335,32 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::updateT
     }
     targetDurationNanos = targetDurationNanos * getAdpfProfile()->mTargetTimeFactor;
 
+    // Reset session records and heuristic boost states when target duration changes.
+    if (targetDurationNanos != mDescriptor->targetNs.count() &&
+        getAdpfProfile()->mHeuristicBoostOn.has_value() &&
+        getAdpfProfile()->mHeuristicBoostOn.value()) {
+        resetSessionHeuristicStates();
+    }
+
     mDescriptor->targetNs = std::chrono::nanoseconds(targetDurationNanos);
     mPSManager->updateTargetWorkDuration(mSessionId, AdpfVoteType::CPU_VOTE_DEFAULT,
                                          mDescriptor->targetNs);
     ATRACE_INT(mAppDescriptorTrace->trace_target.c_str(), targetDurationNanos);
 
     return ndk::ScopedAStatus::ok();
+}
+
+template <class HintManagerT, class PowerSessionManagerT>
+void PowerHintSession<HintManagerT, PowerSessionManagerT>::resetSessionHeuristicStates() {
+    mSessionRecords->resetRecords();
+    mJankyLevel = SessionJankyLevel::LIGHT;
+    mJankyFrameNum = 0;
+    ATRACE_INT(mAppDescriptorTrace->trace_hboost_janky_level.c_str(),
+               static_cast<int32_t>(mJankyLevel));
+    ATRACE_INT(mAppDescriptorTrace->trace_missed_cycles.c_str(), mJankyFrameNum);
+    ATRACE_INT(mAppDescriptorTrace->trace_avg_duration.c_str(), 0);
+    ATRACE_INT(mAppDescriptorTrace->trace_max_duration.c_str(), 0);
+    ATRACE_INT(mAppDescriptorTrace->trace_low_frame_rate.c_str(), false);
 }
 
 template <class HintManagerT, class PowerSessionManagerT>
@@ -374,21 +394,14 @@ template <class HintManagerT, class PowerSessionManagerT>
 void PowerHintSession<HintManagerT, PowerSessionManagerT>::updateHeuristicBoost() {
     auto maxDurationUs = mSessionRecords->getMaxDuration();  // micro seconds
     auto avgDurationUs = mSessionRecords->getAvgDuration();  // micro seconds
-    auto numOfReportedDurations = mSessionRecords->getNumOfRecords();
     auto numOfJankFrames = mSessionRecords->getNumOfMissedCycles();
 
-    if (!maxDurationUs.has_value() || !avgDurationUs.has_value()) {
-        // No history data stored
+    if (!maxDurationUs.has_value() || !avgDurationUs.has_value() || avgDurationUs.value() <= 0) {
+        // No history data stored or invalid average duration.
         return;
     }
 
-    double maxToAvgRatio;
-    if (numOfReportedDurations <= 0) {
-        maxToAvgRatio = maxDurationUs.value() * 1.0 / (mDescriptor->targetNs.count() / 1000);
-    } else {
-        maxToAvgRatio = maxDurationUs.value() / avgDurationUs.value();
-    }
-
+    auto maxToAvgRatio = maxDurationUs.value() * 1.0 / avgDurationUs.value();
     auto isLowFPS =
             mSessionRecords->isLowFrameRate(getAdpfProfile()->mLowFrameRateThreshold.value());
 
@@ -401,6 +414,12 @@ void PowerHintSession<HintManagerT, PowerSessionManagerT>::updateHeuristicBoost(
     ATRACE_INT(mAppDescriptorTrace->trace_avg_duration.c_str(), avgDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_max_duration.c_str(), maxDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_low_frame_rate.c_str(), isLowFPS);
+    if (mSessTag == SessionTag::SURFACEFLINGER) {
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps.c_str(),
+                   mSessionRecords->getLatestFPS());
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps_jitters.c_str(),
+                   mSessionRecords->getNumOfFPSJitters());
+    }
 }
 
 template <class HintManagerT, class PowerSessionManagerT>
@@ -454,7 +473,9 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::reportA
             adpfConfig->mHeuristicBoostOn.has_value() && adpfConfig->mHeuristicBoostOn.value();
 
     if (hboostEnabled) {
-        mSessionRecords->addReportedDurations(actualDurations, mDescriptor->targetNs.count());
+        mSessionRecords->addReportedDurations(
+                actualDurations, mDescriptor->targetNs.count(),
+                mSessTag == SessionTag::SURFACEFLINGER && mPSManager->getGameModeEnableState());
         mPSManager->updateHboostStatistics(mSessionId, mJankyLevel, actualDurations.size());
         updateHeuristicBoost();
     }
@@ -581,6 +602,12 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::sendHin
                 // TODO(kevindubois): add impl
                 break;
             case SessionHint::GPU_LOAD_RESET:
+                // TODO(kevindubois): add impl
+                break;
+            case SessionHint::CPU_LOAD_SPIKE:
+                // TODO(mattbuckley): add impl
+                break;
+            case SessionHint::GPU_LOAD_SPIKE:
                 // TODO(kevindubois): add impl
                 break;
             default:

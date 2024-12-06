@@ -108,6 +108,60 @@ TEST_F(SessionRecordsTest, checkLowFrameRate) {
     ASSERT_FALSE(mRecords->isLowFrameRate(25));
 }
 
+TEST_F(SessionRecordsTest, switchTargetDuration) {
+    ASSERT_FALSE(mRecords->isLowFrameRate(25));
+    mRecords->addReportedDurations(fakeWorkDurations({{0, 8}, {10, 9}, {20, 19}, {40, 8}}),
+                                   MS_TO_NS(10));
+    ASSERT_EQ(4, mRecords->getNumOfRecords());
+    ASSERT_EQ(MS_TO_US(19), mRecords->getMaxDuration().value());
+    ASSERT_EQ(MS_TO_US(11), mRecords->getAvgDuration().value());
+    ASSERT_EQ(1, mRecords->getNumOfMissedCycles());
+
+    // Change the target duration. It will reset all the old record states.
+    mRecords->resetRecords();
+    ASSERT_EQ(0, mRecords->getNumOfRecords());
+    ASSERT_FALSE(mRecords->getMaxDuration().has_value());
+    ASSERT_FALSE(mRecords->getAvgDuration().has_value());
+    ASSERT_EQ(0, mRecords->getNumOfMissedCycles());
+    ASSERT_FALSE(mRecords->isLowFrameRate(25));
+
+    mRecords->addReportedDurations(fakeWorkDurations({{50, 14}, {70, 16}}), MS_TO_NS(20));
+    ASSERT_EQ(2, mRecords->getNumOfRecords());
+    ASSERT_EQ(MS_TO_US(16), mRecords->getMaxDuration().value());
+    ASSERT_EQ(MS_TO_US(15), mRecords->getAvgDuration().value());
+    ASSERT_EQ(0, mRecords->getNumOfMissedCycles());
+    ASSERT_FALSE(mRecords->isLowFrameRate(25));
+}
+
+TEST_F(SessionRecordsTest, checkFPSJitters) {
+    ASSERT_EQ(0, mRecords->getNumOfFPSJitters());
+    mRecords->addReportedDurations(fakeWorkDurations({{0, 8}, {10, 9}, {20, 8}, {30, 8}}),
+                                   MS_TO_NS(10), true);
+    ASSERT_EQ(0, mRecords->getNumOfFPSJitters());
+    ASSERT_EQ(100, mRecords->getLatestFPS());
+
+    mRecords->addReportedDurations(fakeWorkDurations({{40, 22}, {80, 8}}), MS_TO_NS(10), true);
+    ASSERT_EQ(1, mRecords->getNumOfFPSJitters());
+    ASSERT_EQ(50, mRecords->getLatestFPS());
+    mRecords->addReportedDurations(fakeWorkDurations({{90, 8}, {100, 8}, {110, 7}}), MS_TO_NS(10),
+                                   true);
+    ASSERT_EQ(1, mRecords->getNumOfFPSJitters());
+
+    // Push more records to override part of the old ones in the ring buffer
+    mRecords->addReportedDurations(fakeWorkDurations({{120, 22}, {150, 8}}), MS_TO_NS(10), true);
+    ASSERT_EQ(1, mRecords->getNumOfFPSJitters());
+
+    // Cancel the new FPS Jitter evaluation for the new records report.
+    mRecords->addReportedDurations(fakeWorkDurations({{160, 8}, {170, 8}}), MS_TO_NS(10));
+    ASSERT_EQ(1, mRecords->getNumOfFPSJitters());
+    ASSERT_EQ(0, mRecords->getLatestFPS());
+
+    // All the old FPS Jitters stored in the records buffer got overrode by new records.
+    mRecords->addReportedDurations(fakeWorkDurations({{190, 8}, {230, 8}, {300, 8}}), MS_TO_NS(10));
+    ASSERT_EQ(0, mRecords->getNumOfFPSJitters());
+    ASSERT_EQ(0, mRecords->getLatestFPS());
+}
+
 }  // namespace pixel
 }  // namespace impl
 }  // namespace power
