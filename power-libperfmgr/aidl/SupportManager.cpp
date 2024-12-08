@@ -77,6 +77,8 @@ constexpr SupportList<SessionHint> kSessionHintEarliestVersion = {
   {SessionHint::GPU_LOAD_UP, 5},
   {SessionHint::GPU_LOAD_DOWN, 5},
   {SessionHint::GPU_LOAD_RESET, 5},
+  {SessionHint::CPU_LOAD_SPIKE, 6},
+  {SessionHint::GPU_LOAD_SPIKE, 6},
 };
 
 constexpr SupportList<SessionMode> kSessionModeEarliestVersion = {
@@ -154,6 +156,12 @@ SupportInfo SupportManager::makeSupportInfo() {
             .disableGpuFences = false,
             .maxBatchSize = 1,
             .alwaysBatch = false,
+    };
+    out.headroom = {
+        .isCpuSupported = false,
+        .isGpuSupported = false,
+        .cpuMinIntervalMillis = 0,
+        .gpuMinIntervalMillis = 0,
     };
 
     return out;
