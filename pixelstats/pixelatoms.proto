@@ -142,6 +142,7 @@ message Atom {
       DmVerityPartitionReadAmountReported dm_verity_partition_read_amount_reported = 105088;
       WaterEventReported water_event_reported = 105089;
       MediaPlaybackUsageStatsReported media_playback_usage_stats_reported = 105090 [(android.os.statsd.module) = "pixelaudio"];
+      CallUsageStatsReported call_usage_stats_reported = 105091 [(android.os.statsd.module) = "pixelaudio"];
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -3093,8 +3094,56 @@ message MediaPlaybackUsageStatsReported {
   /* Device screen is on or off */
   optional bool is_screen_on = 9;
 
-  /* Device screen is on or off */
+  /* Volume of the playback */
   optional float volume = 10;
+
+  /* Average power in milliwatts. -1 if unavailable. */
+  optional float average_power = 11;
+}
+
+/*
+ * Logs the call usage information stats.
+ * Logged from:
+ *   vendor/google/whitechapel/audio/hal/aidl/audio/metric/suez_data_adapter/statsd_suez_data_adapter.cc
+ *
+ * Estimated Logging Rate: Every 24 hours round to nearest 5 minutes
+ */
+message CallUsageStatsReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+
+  /* Device interface used */
+  optional AudioDeviceInterface downlink_interface = 2;
+
+  /* AudioSource used */
+  optional AudioSource downlink_audio_source = 3;
+
+  /* Usecase used */
+  optional AudioUseCase downlink_audio_use_case = 4;
+
+  /* Device interface used */
+  optional AudioDeviceInterface uplink_interface = 5;
+
+  /* AudioSource used */
+  optional AudioSource uplink_audio_source = 6;
+
+  /* Usecase used */
+  optional AudioUseCase uplink_audio_use_case = 7;
+
+  /* Number of call in the past 24 hours */
+  optional int32 call_count = 8;
+
+  /* Duration in second (value is round to 5 minutes) */
+  optional int32 duration_second = 9;
+
+  /* Current volume for the downlink playback */
+  optional float volume = 10;
+
+  /* Average power in milliwatts. -1 if unavailable. */
+  optional float average_power = 11;
+
+  /* background noise level from 1 (lowest) to 12 (highest). */
+  optional float noise_level = 12;
 }
 
 /*
