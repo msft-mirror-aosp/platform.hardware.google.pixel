@@ -20,7 +20,6 @@
 #include <aidl/AppDescriptorTrace.h>
 #include <aidl/AppHintDesc.h>
 #include <aidl/PhysicalQuantityTypes.h>
-#include <aidl/SessionMetrics.h>
 #include <gmock/gmock.h>
 
 namespace aidl::google::hardware::power::mock::pixel {
@@ -76,8 +75,6 @@ class MockPowerSessionManager {
                 (int64_t sessionId, impl::pixel::SessionJankyLevel jankyLevel, int32_t numOfFrames),
                 ());
     MOCK_METHOD(bool, getGameModeEnableState, (), ());
-    MOCK_METHOD(void, updateFrameBuckets,
-                (int64_t sessionId, const impl::pixel::FrameBuckets &lastReportedFrames), ());
 
     static testing::NiceMock<MockPowerSessionManager> *getInstance() {
         static testing::NiceMock<MockPowerSessionManager> instance{};

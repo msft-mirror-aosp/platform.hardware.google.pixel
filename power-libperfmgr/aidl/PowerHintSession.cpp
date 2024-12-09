@@ -473,12 +473,10 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::reportA
             adpfConfig->mHeuristicBoostOn.has_value() && adpfConfig->mHeuristicBoostOn.value();
 
     if (hboostEnabled) {
-        FrameBuckets newFramesInBuckets;
         mSessionRecords->addReportedDurations(
-                actualDurations, mDescriptor->targetNs.count(), newFramesInBuckets,
+                actualDurations, mDescriptor->targetNs.count(),
                 mSessTag == SessionTag::SURFACEFLINGER && mPSManager->getGameModeEnableState());
         mPSManager->updateHboostStatistics(mSessionId, mJankyLevel, actualDurations.size());
-        mPSManager->updateFrameBuckets(mSessionId, newFramesInBuckets);
         updateHeuristicBoost();
     }
 
