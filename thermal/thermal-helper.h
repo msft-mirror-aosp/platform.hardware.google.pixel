@@ -197,6 +197,8 @@ class ThermalHelperImpl : public ThermalHelper {
     bool initializeSensorMap(const std::unordered_map<std::string, std::string> &path_map);
     bool initializeCoolingDevices(const std::unordered_map<std::string, std::string> &path_map);
     bool isSubSensorValid(std::string_view sensor_data, const SensorFusionType sensor_fusion_type);
+    bool updateTripPointThreshold(std::string_view sensor_name, const bool is_trip_point_ignorable,
+                                  std::string_view threshold, std::string_view trip_point_path);
     void setMinTimeout(SensorInfo *sensor_info);
     void initializeTrip(const std::unordered_map<std::string, std::string> &path_map,
                         std::set<std::string> *monitored_sensors, bool thermal_genl_enabled);

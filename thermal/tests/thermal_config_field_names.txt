@@ -40,6 +40,7 @@ S_Power
 SupportUnderSampling
 TimeResolution
 TriggerSensor
+TripPointIgnorable
 Type
 Version
 VirtualSensor
