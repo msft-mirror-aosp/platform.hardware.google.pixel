@@ -104,6 +104,9 @@ void HintManager::DoHintStatus(const std::string &hint_type, std::chrono::millis
     ATRACE_INT(("H:" + hint_type).c_str(), (timeout_ms == kMilliSecondZero)
                                                    ? std::numeric_limits<int>::max()
                                                    : timeout_ms.count());
+    ATRACE_NAME(("H:" + hint_type + ":" + std::to_string((timeout_ms == kMilliSecondZero)
+                                                   ? std::numeric_limits<int>::max()
+                                                   : timeout_ms.count())).c_str());
     if (now > actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -121,6 +124,7 @@ void HintManager::EndHintStatus(const std::string &hint_type) {
     // Update HintStats if the hint ends earlier than expected end_time
     auto now = std::chrono::steady_clock::now();
     ATRACE_INT(("H:" + hint_type).c_str(), 0);
+    ATRACE_NAME(("H:" + hint_type + ":0").c_str());
     if (now < actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
