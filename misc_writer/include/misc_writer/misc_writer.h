@@ -50,6 +50,7 @@ enum class MiscWriterActions : int32_t {
   kWriteEagleEyePatterns,
   kSetDisableFaceauthEval,
   kClearDisableFaceauthEval,
+  kSetSotaBootFlag,
 
   kUnset = -1,
 };
@@ -77,6 +78,7 @@ class MiscWriter {
         char sota_csku_signature[96];
         char eagleEye[32];
         char skipUnbootableCheck[32];
+        char sota_boot[32];
     } __attribute__((__packed__)) bootloader_message_vendor_t;
 
     static constexpr uint32_t kThemeFlagOffsetInVendorSpace =
@@ -125,6 +127,9 @@ class MiscWriter {
     static constexpr char kDisplayModePrefix[] = "mode=";
     static constexpr uint32_t kEagleEyeOffset =
             offsetof(bootloader_message_vendor_t, eagleEye);
+    static constexpr char kSotaBoot[] = "sota-boot=1";
+    static constexpr uint32_t kSotaBootOffsetInVendorSpace =
+            offsetof(bootloader_message_vendor_t, sota_boot);
 
     // Minimum and maximum valid value for max-ram-size
     static constexpr int32_t kRamSizeDefault = -1;
