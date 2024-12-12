@@ -96,6 +96,7 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     const int kHistTotalNum = kHistTotalLen / LINESIZE;
     ALOGD("kHistTotalLen=%d, kHistTotalNum=%d\n", kHistTotalLen, kHistTotalNum);
 
+    /* TODO: wait for pa/2875004 merge
     if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
         int cnt;
 
@@ -109,6 +110,7 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
               cycle_count.c_str());
     }
+    */
 
     struct BatteryHistoryRawFormat hist_raw;
     struct BatteryHistory hist;
