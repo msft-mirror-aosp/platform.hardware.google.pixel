@@ -243,6 +243,8 @@ message ChargeStats {
     optional int32 csi_aggregate_type = 18;
 
     optional int32 aacr_algo = 19;
+    optional int32 aacp_version = 20;
+    optional int32 aacc = 21;
 }
 
 /* A message containing stats from each charge voltage tier. */
