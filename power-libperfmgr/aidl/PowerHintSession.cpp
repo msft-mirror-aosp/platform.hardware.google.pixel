@@ -60,6 +60,7 @@ static inline int64_t ns_to_100us(int64_t ns) {
 
 static const char systemSessionCheckPath[] = "/proc/vendor_sched/is_tgid_system_ui";
 static const bool systemSessionCheckNodeExist = access(systemSessionCheckPath, W_OK) == 0;
+static constexpr int32_t kTargetDurationChangeThreshold = 30;  // Percentage change threshold
 
 }  // namespace
 
@@ -176,7 +177,7 @@ PowerHintSession<HintManagerT, PowerSessionManagerT>::PowerHintSession(
       mProcTag(getProcessTag(tgid)),
       mIdString(StringPrintf("%" PRId32 "-%" PRId32 "-%" PRId64 "-%s-%" PRId32, tgid, uid,
                              mSessionId, toString(tag).c_str(), static_cast<int32_t>(mProcTag))),
-      mDescriptor(std::make_shared<AppHintDesc>(mSessionId, tgid, uid, threadIds, tag,
+      mDescriptor(std::make_shared<AppHintDesc>(mSessionId, tgid, uid, threadIds, tag, mProcTag,
                                                 std::chrono::nanoseconds(durationNs))),
       mAppDescriptorTrace(std::make_shared<AppDescriptorTrace>(mIdString)),
       mAdpfProfile(mProcTag != ProcessTag::DEFAULT
@@ -335,11 +336,16 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::updateT
     }
     targetDurationNanos = targetDurationNanos * getAdpfProfile()->mTargetTimeFactor;
 
-    // Reset session records and heuristic boost states when target duration changes.
+    // Reset session records and heuristic boost states when the percentage change of target
+    // duration is over the threshold.
     if (targetDurationNanos != mDescriptor->targetNs.count() &&
         getAdpfProfile()->mHeuristicBoostOn.has_value() &&
         getAdpfProfile()->mHeuristicBoostOn.value()) {
-        resetSessionHeuristicStates();
+        auto lastTargetNs = mDescriptor->targetNs.count();
+        if (abs(targetDurationNanos - lastTargetNs) >
+            lastTargetNs / 100 * kTargetDurationChangeThreshold) {
+            resetSessionHeuristicStates();
+        }
     }
 
     mDescriptor->targetNs = std::chrono::nanoseconds(targetDurationNanos);
@@ -414,6 +420,12 @@ void PowerHintSession<HintManagerT, PowerSessionManagerT>::updateHeuristicBoost(
     ATRACE_INT(mAppDescriptorTrace->trace_avg_duration.c_str(), avgDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_max_duration.c_str(), maxDurationUs.value());
     ATRACE_INT(mAppDescriptorTrace->trace_low_frame_rate.c_str(), isLowFPS);
+    if (mSessTag == SessionTag::SURFACEFLINGER) {
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps.c_str(),
+                   mSessionRecords->getLatestFPS());
+        ATRACE_INT(mAppDescriptorTrace->trace_game_mode_fps_jitters.c_str(),
+                   mSessionRecords->getNumOfFPSJitters());
+    }
 }
 
 template <class HintManagerT, class PowerSessionManagerT>
@@ -467,8 +479,12 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::reportA
             adpfConfig->mHeuristicBoostOn.has_value() && adpfConfig->mHeuristicBoostOn.value();
 
     if (hboostEnabled) {
-        mSessionRecords->addReportedDurations(actualDurations, mDescriptor->targetNs.count());
+        FrameBuckets newFramesInBuckets;
+        mSessionRecords->addReportedDurations(
+                actualDurations, mDescriptor->targetNs.count(), newFramesInBuckets,
+                mSessTag == SessionTag::SURFACEFLINGER && mPSManager->getGameModeEnableState());
         mPSManager->updateHboostStatistics(mSessionId, mJankyLevel, actualDurations.size());
+        mPSManager->updateFrameBuckets(mSessionId, newFramesInBuckets);
         updateHeuristicBoost();
     }
 
@@ -594,6 +610,12 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::sendHin
                 // TODO(kevindubois): add impl
                 break;
             case SessionHint::GPU_LOAD_RESET:
+                // TODO(kevindubois): add impl
+                break;
+            case SessionHint::CPU_LOAD_SPIKE:
+                // TODO(mattbuckley): add impl
+                break;
+            case SessionHint::GPU_LOAD_SPIKE:
                 // TODO(kevindubois): add impl
                 break;
             default:

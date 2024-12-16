@@ -96,6 +96,7 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
     const int kHistTotalNum = kHistTotalLen / LINESIZE;
     ALOGD("kHistTotalLen=%d, kHistTotalNum=%d\n", kHistTotalLen, kHistTotalNum);
 
+    /* TODO: wait for pa/2875004 merge
     if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
         int cnt;
 
@@ -109,6 +110,7 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
               cycle_count.c_str());
     }
+    */
 
     struct BatteryHistoryRawFormat hist_raw;
     struct BatteryHistory hist;
@@ -457,7 +459,7 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
                                     .checksum = EvtModelLoading, };
     std::string file_contents;
     std::string path;
-    int num, pos = 0;
+    int num;
     const char *data;
 
     if (paths.empty())
@@ -481,15 +483,12 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
 
     data = file_contents.c_str();
 
-    num = sscanf(&data[pos],  "ModelNextUpdate: %" SCNu16 "\n"
-                 "%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%n",
-                 &params.rslow, &pos);
-    if (num != 1) {
+    num = sscanf(data, "ModelNextUpdate: %" SCNu16 "%*[0-9a-f: \n]ATT: %" SCNu16 " FAIL: %" SCNu16,
+                 &params.rslow, &params.full_cap, &params.esr);
+    if (num != 3) {
         ALOGE("Couldn't process ModelLoading History. num=%d\n", num);
         return;
-    }
-
-    sscanf(&data[pos],  "ATT: %" SCNu16 " FAIL: %" SCNu16, &params.full_cap, &params.esr);
+     }
 
     /* don't need to report when attempts counter is zero */
     if (params.full_cap == 0)
