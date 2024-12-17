@@ -6,6 +6,7 @@ CdevWeightForPID
 Coefficient
 CoefficientType
 Combination
+CombinationType
 CoolingDevices
 Formula
 Hidden
