@@ -40,6 +40,7 @@ namespace impl {
 namespace pixel {
 
 using ::android::perfmgr::HintManager;
+constexpr char kGameModeName[] = "GAME";
 
 namespace {
 /* there is no glibc or bionic wrapper */
@@ -77,13 +78,22 @@ static int set_uclamp(int tid, UclampRange range) {
 }
 }  // namespace
 
-// TODO(jimmyshiu@): Deprecated. Remove once all powerhint.json up-to-date.
 template <class HintManagerT>
 void PowerSessionManager<HintManagerT>::updateHintMode(const std::string &mode, bool enabled) {
     ALOGD("%s %s:%b", __func__, mode.c_str(), enabled);
+    if (mode.compare(kGameModeName) == 0) {
+        mGameModeEnabled = enabled;
+    }
+
+    // TODO(jimmyshiu@): Deprecated. Remove once all powerhint.json up-to-date.
     if (enabled && HintManager::GetInstance()->GetAdpfProfileFromDoHint()) {
         HintManager::GetInstance()->SetAdpfProfileFromDoHint(mode);
     }
+}
+
+template <class HintManagerT>
+bool PowerSessionManager<HintManagerT>::getGameModeEnableState() {
+    return mGameModeEnabled;
 }
 
 template <class HintManagerT>
@@ -103,6 +113,8 @@ void PowerSessionManager<HintManagerT>::addPowerSession(
     sve.idString = idString;
     sve.isActive = sessionDescriptor->is_active;
     sve.isAppSession = sessionDescriptor->uid >= AID_APP_START;
+    sve.tag = sessionDescriptor->tag;
+    sve.procTag = sessionDescriptor->procTag;
     sve.lastUpdatedTime = timeNow;
     sve.votes = std::make_shared<Votes>();
     sve.sessionTrace = sessionTrace;
@@ -131,6 +143,7 @@ void PowerSessionManager<HintManagerT>::removePowerSession(int64_t sessionId) {
 
     std::vector<pid_t> addedThreads;
     std::vector<pid_t> removedThreads;
+    std::string profile = getSessionTaskProfile(sessionId);
 
     {
         // Wait till end to remove session because it needs to be around for apply U clamp
@@ -141,8 +154,8 @@ void PowerSessionManager<HintManagerT>::removePowerSession(int64_t sessionId) {
     }
 
     for (auto tid : removedThreads) {
-        if (!SetTaskProfiles(tid, {"NoResetUclampGrp"})) {
-            ALOGE("Failed to set NoResetUclampGrp task profile for tid:%d", tid);
+        if (!SetTaskProfiles(tid, {profile + "_CLEAR"})) {
+            ALOGE("Failed to set %s_CLEAR task profile for tid:%d", profile.c_str(), tid);
         }
     }
 
@@ -155,18 +168,20 @@ void PowerSessionManager<HintManagerT>::setThreadsFromPowerSession(
     std::vector<pid_t> addedThreads;
     std::vector<pid_t> removedThreads;
     forceSessionActive(sessionId, false);
+    std::string profile = getSessionTaskProfile(sessionId);
     {
         std::lock_guard<std::mutex> lock(mSessionTaskMapMutex);
         mSessionTaskMap.replace(sessionId, threadIds, &addedThreads, &removedThreads);
     }
+
     for (auto tid : addedThreads) {
-        if (!SetTaskProfiles(tid, {"ResetUclampGrp"})) {
-            ALOGE("Failed to set ResetUclampGrp task profile for tid:%d", tid);
+        if (!SetTaskProfiles(tid, {profile + "_SET"})) {
+            ALOGE("Failed to set %s_SET task profile for tid:%d", profile.c_str(), tid);
         }
     }
     for (auto tid : removedThreads) {
-        if (!SetTaskProfiles(tid, {"NoResetUclampGrp"})) {
-            ALOGE("Failed to set NoResetUclampGrp task profile for tid:%d", tid);
+        if (!SetTaskProfiles(tid, {profile + "_CLEAR"})) {
+            ALOGE("Failed to set %s_CLEAR task profile for tid:%d", profile.c_str(), tid);
         }
     }
     forceSessionActive(sessionId, true);
@@ -380,17 +395,17 @@ void PowerSessionManager<HintManagerT>::disableBoosts(int64_t sessionId) {
 
 template <class HintManagerT>
 void PowerSessionManager<HintManagerT>::enableSystemTopAppBoost() {
-    if (HintManager::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
+    if (HintManagerT::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
         ALOGV("PowerSessionManager::enableSystemTopAppBoost!!");
-        HintManager::GetInstance()->EndHint(kDisableBoostHintName);
+        HintManagerT::GetInstance()->EndHint(kDisableBoostHintName);
     }
 }
 
 template <class HintManagerT>
 void PowerSessionManager<HintManagerT>::disableSystemTopAppBoost() {
-    if (HintManager::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
+    if (HintManagerT::GetInstance()->IsHintSupported(kDisableBoostHintName)) {
         ALOGV("PowerSessionManager::disableSystemTopAppBoost!!");
-        HintManager::GetInstance()->DoHint(kDisableBoostHintName);
+        HintManagerT::GetInstance()->DoHint(kDisableBoostHintName);
     }
 }
 
@@ -448,7 +463,7 @@ void PowerSessionManager<HintManagerT>::handleEvent(const EventSessionTimeout &e
 template <class HintManagerT>
 void PowerSessionManager<HintManagerT>::applyUclampLocked(
         int64_t sessionId, std::chrono::steady_clock::time_point timePoint) {
-    auto config = HintManager::GetInstance()->GetAdpfProfile();
+    auto config = HintManagerT::GetInstance()->GetAdpfProfile();
     {
         // TODO(kevindubois) un-indent this in followup patch to reduce churn.
         auto sessValPtr = mSessionTaskMap.findSession(sessionId);
@@ -492,7 +507,7 @@ void PowerSessionManager<HintManagerT>::applyGpuVotesLocked(
         return;
     }
 
-    auto const gpuVotingOn = HintManager::GetInstance()->GetAdpfProfile()->mGpuBoostOn;
+    auto const gpuVotingOn = HintManagerT::GetInstance()->GetAdpfProfile()->mGpuBoostOn;
     if (mGpuCapacityNode && gpuVotingOn) {
         auto const capacity = mSessionTaskMap.getSessionsGpuCapacity(timePoint);
         (*mGpuCapacityNode)->set_gpu_capacity(capacity);
@@ -583,6 +598,18 @@ void PowerSessionManager<HintManagerT>::clear() {
 }
 
 template <class HintManagerT>
+void PowerSessionManager<HintManagerT>::updateFrameBuckets(int64_t sessionId,
+                                                           const FrameBuckets &lastReportedFrames) {
+    std::lock_guard<std::mutex> lock(mSessionTaskMapMutex);
+    auto sessValPtr = mSessionTaskMap.findSession(sessionId);
+    if (nullptr == sessValPtr) {
+        return;
+    }
+
+    sessValPtr->sessFrameBuckets.addUpNewFrames(lastReportedFrames);
+}
+
+template <class HintManagerT>
 void PowerSessionManager<HintManagerT>::updateHboostStatistics(int64_t sessionId,
                                                                SessionJankyLevel jankyLevel,
                                                                int32_t numOfFrames) {
@@ -604,6 +631,22 @@ void PowerSessionManager<HintManagerT>::updateHboostStatistics(int64_t sessionId
         default:
             ALOGW("Unknown janky level during updateHboostStatistics");
     }
+}
+
+template <class HintManagerT>
+std::string PowerSessionManager<HintManagerT>::getSessionTaskProfile(int64_t sessionId) const {
+    auto sessValPtr = mSessionTaskMap.findSession(sessionId);
+    if (nullptr == sessValPtr) {
+        return "SCHED_QOS_SENSITIVE_STANDARD";
+    }
+    if (sessValPtr->procTag == ProcessTag::SYSTEM_UI)
+        return "SCHED_QOS_SENSITIVE_EXTREME";
+    else if (sessValPtr->tag == SessionTag::SURFACEFLINGER)
+        return "SCHED_QOS_SENSITIVE_EXTREME";
+    else if (sessValPtr->tag == SessionTag::HWUI)
+        return "SCHED_QOS_SENSITIVE_EXTREME";
+    else
+        return "SCHED_QOS_SENSITIVE_STANDARD";
 }
 
 template class PowerSessionManager<>;
