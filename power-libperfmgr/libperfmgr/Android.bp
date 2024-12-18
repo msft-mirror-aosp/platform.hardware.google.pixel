@@ -59,19 +59,21 @@ cc_library {
         "NodeLooperThread.cc",
         "HintManager.cc",
         "AdpfConfig.cc",
+        "EventNode.cc",
     ]
 }
 
 cc_test {
     name: "libperfmgr_test",
     defaults: ["libperfmgr_defaults"],
-    static_libs: ["libperfmgr"],
+    static_libs: ["libperfmgr", "libgmock" ],
     srcs: [
         "tests/RequestGroupTest.cc",
         "tests/FileNodeTest.cc",
         "tests/PropertyNodeTest.cc",
         "tests/NodeLooperThreadTest.cc",
         "tests/HintManagerTest.cc",
+        "tests/EventNodeTest.cc",
     ],
     test_suites: ["device-tests"],
     require_root: true,

@@ -76,6 +76,9 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
         open("calibration/q_stored", &mQ);
         open("default/vibe_state", &mVibeState);
         open("default/num_waves", &mEffectCount);
+        open("default/braking_time_bank", &mEffectBrakingTimeBank);
+        open("default/braking_time_index", &mEffectBrakingTimeIndex);
+        open("default/braking_time_ms", &mEffectBrakingTimeMs);
         open("default/owt_free_space", &mOwtFreeSpace);
         open("default/f0_comp_enable", &mF0CompEnable);
         open("default/redc_comp_enable", &mRedcCompEnable);
@@ -87,6 +90,16 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     bool setRedc(std::string value) override { return set(value, &mRedc); }
     bool setQ(std::string value) override { return set(value, &mQ); }
     bool getEffectCount(uint32_t *value) override { return get(value, &mEffectCount); }
+    bool hasEffectBrakingTimeBank() override { return has(mEffectBrakingTimeBank); }
+    bool setEffectBrakingTimeBank(uint32_t value) override {
+        return set(value, &mEffectBrakingTimeBank);
+    }
+    bool setEffectBrakingTimeIndex(uint32_t value) override {
+        return set(value, &mEffectBrakingTimeIndex);
+    }
+    bool getEffectBrakingTimeMs(uint32_t *value) override {
+        return get(value, &mEffectBrakingTimeMs);
+    }
     bool pollVibeState(uint32_t value, int32_t timeoutMs) override {
         return poll(value, &mVibeState, timeoutMs);
     }
@@ -437,6 +450,9 @@ class HwApi : public Vibrator::HwApi, private HwApiBase {
     std::ofstream mRedc;
     std::ofstream mQ;
     std::ifstream mEffectCount;
+    std::ofstream mEffectBrakingTimeBank;
+    std::ofstream mEffectBrakingTimeIndex;
+    std::ifstream mEffectBrakingTimeMs;
     std::ifstream mVibeState;
     std::ifstream mOwtFreeSpace;
     std::ofstream mF0CompEnable;
@@ -470,9 +486,9 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
     static constexpr int32_t DEFAULT_FREQUENCY_SHIFT = 0;
     static constexpr float DEFAULT_DEVICE_MASS = 0.21;
     static constexpr float DEFAULT_LOC_COEFF = 2.5;
-    static constexpr std::array<uint32_t, 2> V_TICK_DEFAULT = {1, 100};
-    static constexpr std::array<uint32_t, 2> V_CLICK_DEFAULT = {1, 100};
-    static constexpr std::array<uint32_t, 2> V_LONG_DEFAULT = {1, 100};
+    static constexpr std::array<uint32_t, 2> V_TICK_DEFAULT = {5, 95};
+    static constexpr std::array<uint32_t, 2> V_CLICK_DEFAULT = {5, 95};
+    static constexpr std::array<uint32_t, 2> V_LONG_DEFAULT = {5, 95};
 
   public:
     HwCal() {}
@@ -500,22 +516,19 @@ class HwCal : public Vibrator::HwCal, private HwCalBase {
         if (getPersist(TICK_VOLTAGES_CONFIG, value)) {
             return true;
         }
-        *value = V_TICK_DEFAULT;
-        return true;
+        return getProperty(TICK_VOLTAGES_CONFIG, value, V_TICK_DEFAULT);
     }
     bool getClickVolLevels(std::array<uint32_t, 2> *value) override {
         if (getPersist(CLICK_VOLTAGES_CONFIG, value)) {
             return true;
         }
-        *value = V_CLICK_DEFAULT;
-        return true;
+        return getProperty(CLICK_VOLTAGES_CONFIG, value, V_CLICK_DEFAULT);
     }
     bool getLongVolLevels(std::array<uint32_t, 2> *value) override {
         if (getPersist(LONG_VOLTAGES_CONFIG, value)) {
             return true;
         }
-        *value = V_LONG_DEFAULT;
-        return true;
+        return getProperty(LONG_VOLTAGES_CONFIG, value, V_LONG_DEFAULT);
     }
     bool isChirpEnabled() override {
         return utils::getProperty("persist.vendor.vibrator.hal.chirp.enabled", false);

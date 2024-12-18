@@ -57,6 +57,15 @@ class Vibrator : public BnVibrator {
         virtual bool setQ(std::string value) = 0;
         // Reports the number of effect waveforms loaded in firmware.
         virtual bool getEffectCount(uint32_t *value) = 0;
+        // Checks whether braking time bank is supported.
+        virtual bool hasEffectBrakingTimeBank() = 0;
+        // Specifies the bank of the effect for querying braking time.
+        // 0: RAM bank, 2: OWT bank
+        virtual bool setEffectBrakingTimeBank(uint32_t value) = 0;
+        // Specifies the index of an effect whose braking time is to be read.
+        virtual bool setEffectBrakingTimeIndex(uint32_t value) = 0;
+        // Gets the braking time duration of SVC effects (returns 0 if not SVC).
+        virtual bool getEffectBrakingTimeMs(uint32_t *value) = 0;
         // Blocks until timeout or vibrator reaches desired state
         // (2 = ASP enabled, 1 = haptic enabled, 0 = disabled).
         virtual bool pollVibeState(uint32_t value, int32_t timeoutMs = -1) = 0;
@@ -216,7 +225,6 @@ class Vibrator : public BnVibrator {
                           const std::shared_ptr<IVibratorCallback> &callback);
     // set 'amplitude' based on an arbitrary scale determined by 'maximum'
     ndk::ScopedAStatus setEffectAmplitude(float amplitude, float maximum, bool scalable);
-    ndk::ScopedAStatus setGlobalAmplitude(bool set);
     // 'simple' effects are those precompiled and loaded into the controller
     ndk::ScopedAStatus getSimpleDetails(Effect effect, EffectStrength strength,
                                         uint32_t *outEffectIndex, uint32_t *outTimeMs,
@@ -252,6 +260,7 @@ class Vibrator : public BnVibrator {
     std::array<uint32_t, 2> mLongEffectVol;
     std::vector<ff_effect> mFfEffects;
     std::vector<uint32_t> mEffectDurations;
+    std::vector<uint32_t> mEffectBrakingDurations;
     std::vector<std::vector<int16_t>> mEffectCustomData;
     std::future<void> mAsyncHandle;
     int8_t mActiveId{-1};
@@ -261,7 +270,7 @@ class Vibrator : public BnVibrator {
     bool mHasHapticAlsaDevice{false};
     bool mHasPassthroughHapticDevice;
     bool mIsUnderExternalControl;
-    float mLongEffectScale = 1.0;
+    float mGlobalAmplitude = 1.0;
     bool mIsChirpEnabled;
     uint32_t mSupportedPrimitivesBits = 0x0;
     float mRedc{0};

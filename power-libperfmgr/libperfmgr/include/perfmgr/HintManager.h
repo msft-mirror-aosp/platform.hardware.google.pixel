@@ -89,8 +89,15 @@ struct Hint {
 class HintManager {
   public:
     HintManager(sp<NodeLooperThread> nm, const std::unordered_map<std::string, Hint> &actions,
-                const std::vector<std::shared_ptr<AdpfConfig>> &adpfs)
-        : nm_(std::move(nm)), actions_(actions), adpfs_(adpfs), adpf_index_(0) {}
+                const std::vector<std::shared_ptr<AdpfConfig>> &adpfs,
+                const std::unordered_map<std::string, std::shared_ptr<AdpfConfig>> &tag_adpfs,
+                std::optional<std::string> gpu_sysfs_config_path)
+        : nm_(std::move(nm)),
+          actions_(actions),
+          adpfs_(adpfs),
+          tag_profile_map_(tag_adpfs),
+          adpf_index_(0),
+          gpu_sysfs_config_path_(gpu_sysfs_config_path) {}
     ~HintManager() {
         if (nm_.get() != nullptr) nm_->Stop();
     }
@@ -101,36 +108,46 @@ class HintManager {
     // Do hint based on hint_type which defined as PowerHint in the actions
     // section of the JSON config. Return true with valid hint_type and also
     // NodeLooperThread::Request succeeds; otherwise return false.
-    bool DoHint(const std::string& hint_type);
+    bool DoHint(const std::string &hint_type);
 
     // Do hint with the override time for all actions defined for the given
     // hint_type.  Return true with valid hint_type and also
     // NodeLooperThread::Request succeeds; otherwise return false.
-    bool DoHint(const std::string& hint_type,
-                std::chrono::milliseconds timeout_ms_override);
+    bool DoHint(const std::string &hint_type, std::chrono::milliseconds timeout_ms_override);
 
     // End hint early. Return true with valid hint_type and also
     // NodeLooperThread::Cancel succeeds; otherwise return false.
-    bool EndHint(const std::string& hint_type);
+    bool EndHint(const std::string &hint_type);
 
     // Query if given hint supported.
-    bool IsHintSupported(const std::string& hint_type) const;
+    bool IsHintSupported(const std::string &hint_type) const;
 
     // Query if given hint enabled.
     bool IsHintEnabled(const std::string &hint_type) const;
 
-    // set ADPF config by profile name.
-    bool SetAdpfProfile(const std::string &profile_name);
+    // TODO(jimmyshiu@): Need to be removed once all powerhint.json up-to-date.
+    bool SetAdpfProfileFromDoHint(const std::string &profile_name);
+    std::shared_ptr<AdpfConfig> GetAdpfProfileFromDoHint() const;
+
+    bool SetAdpfProfile(const std::string &tag, const std::string &profile);
+
+    typedef std::function<void(std::shared_ptr<AdpfConfig>)> AdpfCallback;
+    void RegisterAdpfUpdateEvent(const std::string &tag, AdpfCallback *update_adpf_func);
+    void UnregisterAdpfUpdateEvent(const std::string &tag, AdpfCallback *update_adpf_func);
+
+    std::optional<std::string> gpu_sysfs_config_path() const;
 
     // get current ADPF.
-    std::shared_ptr<AdpfConfig> GetAdpfProfile() const;
+    std::shared_ptr<AdpfConfig> GetAdpfProfile(const std::string &node_name = "OTHER") const;
+
+    // Check if ADPF is supported.
+    bool IsAdpfSupported() const;
 
     // Query if given AdpfProfile supported.
     bool IsAdpfProfileSupported(const std::string &name) const;
 
-    // Static method to construct HintManager from the JSON config file.
-    static std::unique_ptr<HintManager> GetFromJSON(
-        const std::string& config_path, bool start = true);
+    // Static method to construct the global HintManager from the JSON config file.
+    static HintManager *GetFromJSON(const std::string &config_path, bool start = true);
 
     // Return available hints managed by HintManager
     std::vector<std::string> GetHints() const;
@@ -145,21 +162,18 @@ class HintManager {
     bool Start();
 
     // Singleton
-    static std::shared_ptr<HintManager> GetInstance();
-    static std::shared_ptr<HintManager> Reload(bool start);
+    static HintManager *GetInstance();
 
   protected:
-    static std::vector<std::unique_ptr<Node>> ParseNodes(
-        const std::string& json_doc);
+    static std::vector<std::unique_ptr<Node>> ParseNodes(const std::string &json_doc);
     static std::unordered_map<std::string, Hint> ParseActions(
             const std::string &json_doc, const std::vector<std::unique_ptr<Node>> &nodes);
     static std::vector<std::shared_ptr<AdpfConfig>> ParseAdpfConfigs(const std::string &json_doc);
     static bool InitHintStatus(const std::unique_ptr<HintManager> &hm);
 
-  private:
+    static void Reload(bool start);
     HintManager(HintManager const&) = delete;
-    void operator=(HintManager const&) = delete;
-    static std::shared_ptr<HintManager> mInstance;
+    HintManager &operator=(HintManager const &) = delete;
 
     bool ValidateHint(const std::string& hint_type) const;
     // Helper function to update the HintStatus when DoHint
@@ -173,7 +187,17 @@ class HintManager {
     sp<NodeLooperThread> nm_;
     std::unordered_map<std::string, Hint> actions_;
     std::vector<std::shared_ptr<AdpfConfig>> adpfs_;
+    // TODO(jimmyshiu@): Need to be removed once all powerhint.json up-to-date.
+    std::unordered_map<std::string, std::shared_ptr<AdpfConfig>> tag_profile_map_;
     uint32_t adpf_index_;
+    std::optional<std::string> gpu_sysfs_config_path_;
+
+    static std::unique_ptr<HintManager> sInstance;
+
+    // Hint Update Callback
+    void OnNodeUpdate(const std::string &name, const std::string &path, const std::string &value);
+    // set ADPF config by hint name.
+    std::unordered_map<std::string, std::vector<AdpfCallback *>> tag_update_callback_list_;
 };
 
 }  // namespace perfmgr

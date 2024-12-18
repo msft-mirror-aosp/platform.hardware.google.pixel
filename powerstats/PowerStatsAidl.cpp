@@ -51,6 +51,10 @@ void PowerStats::addStateResidencyDataProvider(std::unique_ptr<IStateResidencyDa
                 .name = entityName,
                 .states = states,
         };
+        if (states.empty()) {
+            mStateResidencyDataProviders.back()->registerStatesUpdateCallback(std::bind(
+                    &PowerStats::statesUpdate, this, std::placeholders::_1, std::placeholders::_2));
+        }
         mPowerEntityInfos.emplace_back(i);
         mStateResidencyDataProviderIndex.emplace_back(index);
     }
@@ -178,6 +182,19 @@ ndk::ScopedAStatus PowerStats::readEnergyMeter(const std::vector<int32_t> &in_ch
     return mEnergyMeterDataProvider->readEnergyMeter(in_channelIds, _aidl_return);
 }
 
+void PowerStats::statesUpdate(const std::string &entityName, const std::vector<State> &states) {
+    for (auto &powerEntityInfo : mPowerEntityInfos) {
+        if (powerEntityInfo.name == entityName) {
+            // Update only if states have not yet been set.
+            if (powerEntityInfo.states.empty()) {
+                powerEntityInfo.states = states;
+            }
+            return;
+        }
+    }
+    LOG(WARNING) << "Attempt to update a non-existent entry: " << entityName;
+}
+
 void PowerStats::getEntityStateNames(
         std::unordered_map<int32_t, std::string> *entityNames,
         std::unordered_map<int32_t, std::unordered_map<int32_t, std::string>> *stateNames) {
@@ -268,15 +285,15 @@ void PowerStats::dumpStateResidency(std::ostringstream &oss, bool delta) {
     const char *dataFormatDelta = "  %16s   %18s   %13" PRIu64 " ms (%14" PRId64 ")   %15" PRIu64
                                   " (%16" PRId64 ")   %14" PRIu64 " ms (%14" PRId64 ")\n";
 
-    // Construct maps to entity and state names
-    std::unordered_map<int32_t, std::string> entityNames;
-    std::unordered_map<int32_t, std::unordered_map<int32_t, std::string>> stateNames;
-    getEntityStateNames(&entityNames, &stateNames);
-
     oss << "\n============= PowerStats HAL 2.0 state residencies ==============\n";
 
     std::vector<StateResidencyResult> results;
     getStateResidency({}, &results);
+
+    // Construct maps to entity and state names
+    std::unordered_map<int32_t, std::string> entityNames;
+    std::unordered_map<int32_t, std::unordered_map<int32_t, std::string>> stateNames;
+    getEntityStateNames(&entityNames, &stateNames);
 
     if (delta) {
         static std::vector<StateResidencyResult> prevResults;

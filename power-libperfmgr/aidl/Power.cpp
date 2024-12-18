@@ -31,6 +31,7 @@
 #include <mutex>
 #include <optional>
 
+#include "AdpfTypes.h"
 #include "PowerHintSession.h"
 #include "PowerSessionManager.h"
 #include "disp-power/DisplayLowPower.h"
@@ -41,14 +42,7 @@ namespace hardware {
 namespace power {
 namespace impl {
 namespace pixel {
-
-using ::aidl::google::hardware::power::impl::pixel::PowerHintSession;
 using ::android::perfmgr::HintManager;
-
-using ::aidl::android::hardware::common::fmq::MQDescriptor;
-using ::aidl::android::hardware::common::fmq::SynchronizedReadWrite;
-using ::aidl::android::hardware::power::ChannelMessage;
-using ::android::AidlMessageQueue;
 
 constexpr char kPowerHalStateProp[] = "vendor.powerhal.state";
 constexpr char kPowerHalAudioProp[] = "vendor.powerhal.audio";
@@ -98,9 +92,8 @@ Power::Power(std::shared_ptr<DisplayLowPower> dlpw)
 
 ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
     LOG(DEBUG) << "Power setMode: " << toString(type) << " to: " << enabled;
-    if (HintManager::GetInstance()->GetAdpfProfile() &&
-        HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs > 0) {
-        PowerSessionManager::getInstance()->updateHintMode(toString(type), enabled);
+    if (HintManager::GetInstance()->IsAdpfSupported()) {
+        PowerSessionManager<>::getInstance()->updateHintMode(toString(type), enabled);
     }
     switch (type) {
         case Mode::LOW_POWER:
@@ -145,6 +138,15 @@ ndk::ScopedAStatus Power::setMode(Mode type, bool enabled) {
                     HintManager::GetInstance()->DoHint("SUSTAINED_PERFORMANCE");
                 }
                 mVRModeOn = false;
+            }
+            break;
+        case Mode::AUTOMOTIVE_PROJECTION:
+            mDisplayLowPower->SetAAMode(enabled);
+            if (enabled) {
+                HintManager::GetInstance()->DoHint("AUTOMOTIVE_PROJECTION");
+            } else {
+                HintManager::GetInstance()->EndHint("AUTOMOTIVE_PROJECTION");
+                HintManager::GetInstance()->EndHint("DISPLAY_IDLE_AA");
             }
             break;
         case Mode::LAUNCH:
@@ -225,10 +227,6 @@ ndk::ScopedAStatus Power::isModeSupported(Mode type, bool *_aidl_return) {
 
 ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
     LOG(DEBUG) << "Power setBoost: " << toString(type) << " duration: " << durationMs;
-    if (HintManager::GetInstance()->GetAdpfProfile() &&
-        HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs > 0) {
-        PowerSessionManager::getInstance()->updateHintBoost(toString(type), durationMs);
-    }
     switch (type) {
         case Boost::INTERACTION:
             if (mVRModeOn || mSustainedPerfModeOn) {
@@ -304,7 +302,7 @@ binder_status_t Power::dump(int fd, const char **, uint32_t) {
             boolToString(mSustainedPerfModeOn)));
     // Dump nodes through libperfmgr
     HintManager::GetInstance()->DumpToFd(fd);
-    PowerSessionManager::getInstance()->dumpToFd(fd);
+    PowerSessionManager<>::getInstance()->dumpToFd(fd);
     if (!::android::base::WriteStringToFd(buf, fd)) {
         PLOG(ERROR) << "Failed to dump state to fd";
     }
@@ -322,7 +320,7 @@ ndk::ScopedAStatus Power::createHintSession(int32_t tgid, int32_t uid,
 }
 
 ndk::ScopedAStatus Power::getHintSessionPreferredRate(int64_t *outNanoseconds) {
-    *outNanoseconds = HintManager::GetInstance()->GetAdpfProfile()
+    *outNanoseconds = HintManager::GetInstance()->IsAdpfSupported()
                               ? HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs
                               : 0;
     if (*outNanoseconds <= 0) {
@@ -335,8 +333,7 @@ ndk::ScopedAStatus Power::getHintSessionPreferredRate(int64_t *outNanoseconds) {
 ndk::ScopedAStatus Power::createHintSessionWithConfig(
         int32_t tgid, int32_t uid, const std::vector<int32_t> &threadIds, int64_t durationNanos,
         SessionTag tag, SessionConfig *config, std::shared_ptr<IPowerHintSession> *_aidl_return) {
-    if (!HintManager::GetInstance()->GetAdpfProfile() ||
-        HintManager::GetInstance()->GetAdpfProfile()->mReportingRateLimitNs <= 0) {
+    if (!HintManager::GetInstance()->IsAdpfSupported()) {
         *_aidl_return = nullptr;
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
@@ -345,10 +342,13 @@ ndk::ScopedAStatus Power::createHintSessionWithConfig(
         *_aidl_return = nullptr;
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
     }
-    std::shared_ptr<IPowerHintSession> session =
-            ndk::SharedRefBase::make<PowerHintSession>(tgid, uid, threadIds, durationNanos, tag);
+    std::shared_ptr<PowerHintSession<>> session =
+            ndk::SharedRefBase::make<PowerHintSession<>>(tgid, uid, threadIds, durationNanos, tag);
+
     *_aidl_return = session;
-    static_cast<PowerHintSession *>(_aidl_return->get())->getSessionConfig(config);
+    session->getSessionConfig(config);
+    PowerSessionManager<>::getInstance()->registerSession(session, config->id);
+
     return ndk::ScopedAStatus::ok();
 }
 

@@ -24,6 +24,7 @@
 
 #include <android-base/file.h>
 #include <pixelstats/BatteryEEPROMReporter.h>
+#include <pixelstats/StatsHelper.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 
 namespace android {
@@ -42,10 +43,12 @@ using android::hardware::google::pixel::PixelAtoms::BatteryEEPROM;
 
 BatteryEEPROMReporter::BatteryEEPROMReporter() {}
 
-static bool fileExists(const std::string &path) {
-    struct stat sb;
+void BatteryEEPROMReporter::setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset,
+                                              int content) {
+    std::vector<VendorAtomValue> &val = *values;
 
-    return stat(path.c_str(), &sb) == 0;
+    if (offset - kVendorAtomOffset < val.size())
+        val[offset - kVendorAtomOffset].set<VendorAtomValue::intValue>(content);
 }
 
 void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_client,
@@ -210,8 +213,8 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     ALOGD("reportEvent: cycle_cnt:%d, full_cap:%d, esr:%d, rslow:%d, soh:%d, "
           "batt_temp:%d, cutoff_soc:%d, cc_soc:%d, sys_soc:%d, msoc:%d, "
           "batt_soc:%d, reserve:%d, max_temp:%d, min_temp:%d, max_vbatt:%d, "
-          "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%d, full_rep:%d, "
-          "tempco:0x%x, rcomp0:0x%x, timer_h:%d",
+          "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%#x, full_rep:%d, "
+          "tempco:%#x, rcomp0:%#x, timer_h:%d",
           hist.cycle_cnt, hist.full_cap, hist.esr, hist.rslow, hist.soh, hist.batt_temp,
           hist.cutoff_soc, hist.cc_soc, hist.sys_soc, hist.msoc, hist.batt_soc, hist.reserve,
           hist.max_temp, hist.min_temp, hist.max_vbatt, hist.min_vbatt, hist.max_ibatt,
@@ -275,9 +278,55 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
         ALOGE("Unable to report BatteryEEPROM to Stats service");
 }
 
+void BatteryEEPROMReporter::reportEventInt32(const std::shared_ptr<IStats> &stats_client,
+                                             const struct BatteryHistoryInt32 &hist) {
+    std::vector<VendorAtomValue> values(23);
+
+    ALOGD("reportEvent: cycle_cnt:%d, full_cap:%d, esr:%d, rslow:%d, soh:%d, "
+          "batt_temp:%d, cutoff_soc:%d, cc_soc:%d, sys_soc:%d, msoc:%d, "
+          "batt_soc:%d, reserve:%d, max_temp:%d, min_temp:%d, max_vbatt:%d, "
+          "min_vbatt:%d, max_ibatt:%d, min_ibatt:%d, checksum:%#x, full_rep:%d, "
+          "tempco:%#x, rcomp0:%#x, timer_h:%d",
+          hist.cycle_cnt, hist.full_cap, hist.esr, hist.rslow, hist.soh, hist.batt_temp,
+          hist.cutoff_soc, hist.cc_soc, hist.sys_soc, hist.msoc, hist.batt_soc, hist.reserve,
+          hist.max_temp, hist.min_temp, hist.max_vbatt, hist.min_vbatt, hist.max_ibatt,
+          hist.min_ibatt, hist.checksum, hist.full_rep, hist.tempco, hist.rcomp0, hist.timer_h);
+
+    setAtomFieldValue(&values, BatteryEEPROM::kCycleCntFieldNumber, hist.cycle_cnt);
+    setAtomFieldValue(&values, BatteryEEPROM::kFullCapFieldNumber, hist.full_cap);
+    setAtomFieldValue(&values, BatteryEEPROM::kEsrFieldNumber, hist.esr);
+    setAtomFieldValue(&values, BatteryEEPROM::kRslowFieldNumber, hist.rslow);
+    setAtomFieldValue(&values, BatteryEEPROM::kSohFieldNumber, hist.soh);
+    setAtomFieldValue(&values, BatteryEEPROM::kBattTempFieldNumber, hist.batt_temp);
+    setAtomFieldValue(&values, BatteryEEPROM::kCutoffSocFieldNumber, hist.cutoff_soc);
+    setAtomFieldValue(&values, BatteryEEPROM::kCcSocFieldNumber, hist.cc_soc);
+    setAtomFieldValue(&values, BatteryEEPROM::kSysSocFieldNumber, hist.sys_soc);
+    setAtomFieldValue(&values, BatteryEEPROM::kMsocFieldNumber, hist.msoc);
+    setAtomFieldValue(&values, BatteryEEPROM::kBattSocFieldNumber, hist.batt_soc);
+    setAtomFieldValue(&values, BatteryEEPROM::kReserveFieldNumber, hist.reserve);
+    setAtomFieldValue(&values, BatteryEEPROM::kMaxTempFieldNumber, hist.max_temp);
+    setAtomFieldValue(&values, BatteryEEPROM::kMinTempFieldNumber, hist.min_temp);
+    setAtomFieldValue(&values, BatteryEEPROM::kMaxVbattFieldNumber, hist.max_vbatt);
+    setAtomFieldValue(&values, BatteryEEPROM::kMinVbattFieldNumber, hist.min_vbatt);
+    setAtomFieldValue(&values, BatteryEEPROM::kMaxIbattFieldNumber, hist.max_ibatt);
+    setAtomFieldValue(&values, BatteryEEPROM::kMinIbattFieldNumber, hist.min_ibatt);
+    setAtomFieldValue(&values, BatteryEEPROM::kChecksumFieldNumber, hist.checksum);
+    setAtomFieldValue(&values, BatteryEEPROM::kTempcoFieldNumber, hist.tempco);
+    setAtomFieldValue(&values, BatteryEEPROM::kRcomp0FieldNumber, hist.rcomp0);
+    setAtomFieldValue(&values, BatteryEEPROM::kTimerHFieldNumber, hist.timer_h);
+    setAtomFieldValue(&values, BatteryEEPROM::kFullRepFieldNumber, hist.full_rep);
+
+    VendorAtom event = {.reverseDomainName = "",
+                        .atomId = PixelAtoms::Atom::kBatteryEeprom,
+                        .values = std::move(values)};
+    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
+    if (!ret.isOk())
+        ALOGE("Unable to report BatteryEEPROM to Stats service");
+}
+
 void BatteryEEPROMReporter::checkAndReportGMSR(const std::shared_ptr<IStats> &stats_client,
                                                const std::vector<std::string> &paths) {
-    struct BatteryHistory gmsr;
+    struct BatteryHistory gmsr = {.checksum = EvtGMSR};
     std::string file_contents;
     std::string path;
     int16_t num;
@@ -297,29 +346,17 @@ void BatteryEEPROMReporter::checkAndReportGMSR(const std::shared_ptr<IStats> &st
         return;
     }
 
-    gmsr.checksum = 0xFFFF;
-    if (path.find("max77779") == std::string::npos &&
-        paths[0].find("max77779") == std::string::npos) {
-        num = sscanf(file_contents.c_str(),  "rcomp0\t:%4" SCNx16 "\ntempco\t:%4" SCNx16
-                     "\nfullcaprep\t:%4" SCNx16 "\ncycles\t:%4" SCNx16 "\nfullcapnom\t:%4" SCNx16
-                     "\nqresidual00\t:%4" SCNx16 "\nqresidual10\t:%4" SCNx16
-                     "\nqresidual20\t:%4" SCNx16 "\nqresidual30\t:%4" SCNx16
-                     "\ncv_mixcap\t:%4" SCNx16 "\nhalftime\t:%4" SCNx16,
-                     &gmsr.rcomp0, &gmsr.tempco, &gmsr.full_rep, &gmsr.cycle_cnt, &gmsr.full_cap,
-                     &gmsr.max_vbatt, &gmsr.min_vbatt, &gmsr.max_ibatt, &gmsr.min_ibatt,
-                     &gmsr.esr, &gmsr.rslow);
-        if (num != kNum77759GMSRFields) {
-            ALOGE("Couldn't process 77759GMSR. num=%d\n", num);
-            return;
-        }
-    } else {
-        num = sscanf(file_contents.c_str(),  "rcomp0\t:%4" SCNx16 "\ntempco\t:%4" SCNx16
-                     "\nfullcaprep\t:%4" SCNx16 "\ncycles\t:%4" SCNx16 "\nfullcapnom\t:%4" SCNx16,
-                     &gmsr.rcomp0, &gmsr.tempco, &gmsr.full_rep, &gmsr.cycle_cnt, &gmsr.full_cap);
-        if (num != kNum77779GMSRFields) {
-            ALOGE("Couldn't process 77779GMSR. num=%d\n", num);
-            return;
-        }
+    num = sscanf(file_contents.c_str(),  "rcomp0\t:%4" SCNx16 "\ntempco\t:%4" SCNx16
+                 "\nfullcaprep\t:%4" SCNx16 "\ncycles\t:%4" SCNx16 "\nfullcapnom\t:%4" SCNx16
+                 "\nqresidual00\t:%4" SCNx16 "\nqresidual10\t:%4" SCNx16
+                 "\nqresidual20\t:%4" SCNx16 "\nqresidual30\t:%4" SCNx16
+                 "\ncv_mixcap\t:%4" SCNx16 "\nhalftime\t:%4" SCNx16,
+                 &gmsr.rcomp0, &gmsr.tempco, &gmsr.full_rep, &gmsr.cycle_cnt, &gmsr.full_cap,
+                 &gmsr.max_vbatt, &gmsr.min_vbatt, &gmsr.max_ibatt, &gmsr.min_ibatt,
+                 &gmsr.esr, &gmsr.rslow);
+    if (num != kNum77759GMSRFields && num != kNum77779GMSRFields) {
+        ALOGE("Couldn't process GMSR. num=%d\n", num);
+        return;
     }
 
     if (gmsr.tempco == 0xFFFF || gmsr.rcomp0 == 0xFFFF || gmsr.full_cap == 0xFFFF) {
@@ -393,6 +430,152 @@ void BatteryEEPROMReporter::checkAndReportMaxfgHistory(const std::shared_ptr<ISt
 
         reportEvent(stats_client, maxfg_hist);
     }
+}
+
+void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<IStats> &client,
+                                                         const std::vector<std::string> &paths) {
+    struct BatteryHistory params = {.full_cap = 0, .esr = 0, .rslow = 0,
+                                    .checksum = EvtModelLoading, };
+    std::string file_contents;
+    std::string path;
+    int num, pos = 0;
+    const char *data;
+
+    if (paths.empty())
+        return;
+
+    for (int i = 0; i < paths.size(); i++) {
+        if (fileExists(paths[i])) {
+            path = paths[i];
+            break;
+        }
+    }
+
+    /* not found */
+    if (path.empty())
+        return;
+
+    if (!ReadFileToString(path, &file_contents)) {
+        ALOGE("Unable to read ModelLoading History path: %s - %s", path.c_str(), strerror(errno));
+        return;
+    }
+
+    data = file_contents.c_str();
+
+    num = sscanf(&data[pos],  "ModelNextUpdate: %" SCNu16 "\n"
+                 "%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%n",
+                 &params.rslow, &pos);
+    if (num != 1) {
+        ALOGE("Couldn't process ModelLoading History. num=%d\n", num);
+        return;
+    }
+
+    sscanf(&data[pos],  "ATT: %" SCNu16 " FAIL: %" SCNu16, &params.full_cap, &params.esr);
+
+    /* don't need to report when attempts counter is zero */
+    if (params.full_cap == 0)
+        return;
+
+    reportEvent(client, params);
+}
+
+void BatteryEEPROMReporter::checkAndReportFGLearning(const std::shared_ptr<IStats> &stats_client,
+                                                     const std::vector<std::string> &paths) {
+    struct BatteryHistoryInt32 params = {.checksum = EvtFGLearningHistory};
+    std::string path;
+    struct timespec boot_time;
+    auto format = FormatIgnoreAddr;
+    std::vector<std::vector<uint32_t>> events;
+
+    if (paths.empty())
+        return;
+
+    for (int i = 0; i < paths.size(); i++) {
+        if (fileExists(paths[i])) {
+            path = paths[i];
+            break;
+        }
+    }
+
+    /* not found */
+    if (path.empty())
+        return;
+
+    clock_gettime(CLOCK_MONOTONIC, &boot_time);
+
+    readLogbuffer(path, kNumFGLearningFieldsV3, params.checksum, format, last_lh_check_, events);
+    if (events.size() == 0)
+        readLogbuffer(path, kNumFGLearningFieldsV2, params.checksum, format, last_lh_check_, events);
+
+    for (int event_idx = 0; event_idx < events.size(); event_idx++) {
+        std::vector<uint32_t> &event = events[event_idx];
+        if (event.size() == kNumFGLearningFieldsV2 ||
+            event.size() == kNumFGLearningFieldsV3) {
+            params.full_cap = event[0];                /* fcnom */
+            params.esr = event[1];                     /* dpacc */
+            params.rslow = event[2];                   /* dqacc */
+            params.full_rep = event[3];                /* fcrep */
+            params.msoc = (uint8_t)(event[4] >> 8);    /* repsoc */
+            params.sys_soc = (uint8_t)(event[5] >> 8); /* mixsoc */
+            params.batt_soc = (uint8_t)(event[6] >> 8);/* vfsoc */
+            params.min_ibatt = event[7];               /* fstats */
+            params.max_temp = (int8_t)(event[8] >> 8); /* avgtemp */
+            params.min_temp = (int8_t)(event[9] >> 8); /* temp */
+            params.max_ibatt = event[10];              /* qh */
+            params.max_vbatt = event[11];              /* vcell */
+            params.min_vbatt = event[12];              /* avgvcell */
+            params.cycle_cnt = event[13];              /* vfocf */
+            params.rcomp0 = event[14];                 /* rcomp0 */
+            params.tempco = event[15];                 /* tempco */
+            if (event.size() == kNumFGLearningFieldsV3)
+                params.soh = event[16];                /* unix time */
+        } else {
+            ALOGE("Not support %zu fields for FG learning event", event.size());
+            continue;
+        }
+        reportEventInt32(stats_client, params);
+    }
+    last_lh_check_ = (unsigned int)boot_time.tv_sec;
+}
+
+void BatteryEEPROMReporter::checkAndReportValidation(const std::shared_ptr<IStats> &stats_client,
+                                                     const std::vector<std::string> &paths) {
+    struct BatteryHistoryInt32 params = {.checksum = EvtHistoryValidation};
+    std::string path;
+    struct timespec boot_time;
+    auto format = FormatIgnoreAddr;
+    std::vector<std::vector<uint32_t>> events;
+
+    if (paths.empty())
+        return;
+
+    for (int i = 0; i < paths.size(); i++) {
+        if (fileExists(paths[i])) {
+            path = paths[i];
+            break;
+        }
+    }
+
+    /* not found */
+    if (path.empty())
+        return;
+
+    clock_gettime(CLOCK_MONOTONIC, &boot_time);
+
+    readLogbuffer(path, kNumValidationFields, params.checksum, format, last_hv_check_, events);
+    for (int event_idx = 0; event_idx < events.size(); event_idx++) {
+        std::vector<uint32_t> &event = events[event_idx];
+        if (event.size() == kNumValidationFields) {
+            params.full_cap = event[0]; /* fcnom */
+            params.esr = event[1];      /* dpacc */
+            params.rslow = event[2];    /* dqacc */
+            params.full_rep = event[3]; /* fcrep */
+            reportEventInt32(stats_client, params);
+        } else {
+            ALOGE("Not support %zu fields for History Validation event", event.size());
+        }
+    }
+    last_hv_check_ = (unsigned int)boot_time.tv_sec;
 }
 
 }  // namespace pixel

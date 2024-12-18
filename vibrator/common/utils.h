@@ -103,6 +103,19 @@ inline Enable_If_Unsigned<T, T> getProperty(const std::string &key, const T def)
     return ::android::base::GetUintProperty(key, def);
 }
 
+template <typename T, size_t N>
+inline std::array<T, N> getProperty(const std::string &key, const std::array<T, N> &def) {
+    std::string value = ::android::base::GetProperty(key, "");
+    if (!value.empty()) {
+        std::array<T, N> result{0};
+        std::stringstream stream{value};
+        utils::unpack(stream, &result);
+        if (stream && stream.eof())
+            return result;
+    }
+    return def;
+}
+
 template <>
 inline bool getProperty<bool>(const std::string &key, const bool def) {
     return ::android::base::GetBoolProperty(key, def);
@@ -110,10 +123,12 @@ inline bool getProperty<bool>(const std::string &key, const bool def) {
 
 template <typename T>
 static void openNoCreate(const std::string &file, T *outStream) {
-    auto mode = std::is_base_of_v<std::ostream, T> ? std::ios_base::out : std::ios_base::in;
+    if (!std::filesystem::exists(file)) {
+        ALOGE("File does not exist: %s", file.c_str());
+        return;
+    }
 
-    // Force 'in' mode to prevent file creation
-    outStream->open(file, mode | std::ios_base::in);
+    outStream->open(file);
     if (!*outStream) {
         ALOGE("Failed to open %s (%d): %s", file.c_str(), errno, strerror(errno));
     }

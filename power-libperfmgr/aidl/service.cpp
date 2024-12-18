@@ -33,15 +33,15 @@
 using aidl::google::hardware::power::impl::pixel::DisplayLowPower;
 using aidl::google::hardware::power::impl::pixel::Power;
 using aidl::google::hardware::power::impl::pixel::PowerExt;
-using aidl::google::hardware::power::impl::pixel::PowerSessionManager;
 using ::android::perfmgr::HintManager;
 
 constexpr std::string_view kPowerHalInitProp("vendor.powerhal.init");
 
 int main() {
     android::base::SetDefaultTag(LOG_TAG);
+    android::base::SetMinimumLogSeverity(android::base::INFO);
     // Parse config but do not start the looper
-    std::shared_ptr<HintManager> hm = HintManager::GetInstance();
+    HintManager *hm = HintManager::GetInstance();
     if (!hm) {
         LOG(FATAL) << "HintManager Init failed";
     }

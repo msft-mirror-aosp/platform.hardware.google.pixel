@@ -30,13 +30,23 @@ std::ostream &SessionValueEntry::dump(std::ostream &os) const {
     os << "ID.Min.Act(" << idString;
     if (votes) {
         UclampRange uclampRange;
-        votes->getUclampRange(&uclampRange, timeNow);
+        votes->getUclampRange(uclampRange, timeNow);
         os << ", " << uclampRange.uclampMin;
         os << "-" << uclampRange.uclampMax;
     } else {
         os << ", votes nullptr";
     }
     os << ", " << isActive;
+    auto totalFrames = hBoostModeDist.lightModeFrames + hBoostModeDist.moderateModeFrames +
+                       hBoostModeDist.severeModeFrames;
+    os << ", HBoost:"
+       << (totalFrames <= 0 ? 0 : (hBoostModeDist.lightModeFrames * 10000 / totalFrames / 100.0))
+       << "%-"
+       << (totalFrames <= 0 ? 0 : (hBoostModeDist.moderateModeFrames * 10000 / totalFrames / 100.0))
+       << "%-"
+       << (totalFrames <= 0 ? 0 : (hBoostModeDist.severeModeFrames * 10000 / totalFrames / 100.0))
+       << "%-" << totalFrames << ", ";
+
     return os;
 }
 

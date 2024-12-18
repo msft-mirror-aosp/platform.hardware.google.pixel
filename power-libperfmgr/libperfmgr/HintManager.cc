@@ -30,7 +30,9 @@
 
 #include <algorithm>
 #include <set>
+#include <string>
 
+#include "perfmgr/EventNode.h"
 #include "perfmgr/FileNode.h"
 #include "perfmgr/PropertyNode.h"
 
@@ -43,10 +45,14 @@ constexpr std::chrono::steady_clock::time_point kTimePointMax =
         std::chrono::steady_clock::time_point::max();
 }  // namespace
 
+using ::android::base::GetProperty;
+using ::android::base::StringPrintf;
+
 constexpr char kPowerHalTruncateProp[] = "vendor.powerhal.truncate";
 constexpr std::string_view kConfigDebugPathProperty("vendor.powerhal.config.debug");
 constexpr std::string_view kConfigProperty("vendor.powerhal.config");
 constexpr std::string_view kConfigDefaultFileName("powerhint.json");
+constexpr char kAdpfEventNodePath[] = "<AdpfConfig>:";
 
 bool HintManager::ValidateHint(const std::string& hint_type) const {
     if (nm_.get() == nullptr) {
@@ -95,8 +101,9 @@ void HintManager::DoHintStatus(const std::string &hint_type, std::chrono::millis
     std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
     actions_.at(hint_type).status->stats.count.fetch_add(1);
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), (timeout_ms == kMilliSecondZero) ? std::numeric_limits<int>::max()
-                                                                   : timeout_ms.count());
+    ATRACE_INT(("H:" + hint_type).c_str(), (timeout_ms == kMilliSecondZero)
+                                                   ? std::numeric_limits<int>::max()
+                                                   : timeout_ms.count());
     if (now > actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -113,7 +120,7 @@ void HintManager::EndHintStatus(const std::string &hint_type) {
     std::lock_guard<std::mutex> lock(actions_.at(hint_type).hint_lock);
     // Update HintStats if the hint ends earlier than expected end_time
     auto now = std::chrono::steady_clock::now();
-    ATRACE_INT(hint_type.c_str(), 0);
+    ATRACE_INT(("H:" + hint_type).c_str(), 0);
     if (now < actions_.at(hint_type).status->end_time) {
         actions_.at(hint_type).status->stats.duration_ms.fetch_add(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -250,9 +257,8 @@ void HintManager::DumpToFd(int fd) {
     std::sort(keys.begin(), keys.end());
     for (const auto &ordered_key : keys) {
         HintStats hint_stats(GetHintStats(ordered_key));
-        hint_stats_string +=
-                android::base::StringPrintf("%s\t%" PRIu32 "\t%" PRIu64 "\n", ordered_key.c_str(),
-                                            hint_stats.count, hint_stats.duration_ms);
+        hint_stats_string += StringPrintf("%s\t%" PRIu32 "\t%" PRIu64 "\n", ordered_key.c_str(),
+                                          hint_stats.count, hint_stats.duration_ms);
     }
     if (!android::base::WriteStringToFd(hint_stats_string, fd)) {
         LOG(ERROR) << "Failed to dump fd: " << fd;
@@ -263,14 +269,20 @@ void HintManager::DumpToFd(int fd) {
     }
 
     // Dump current ADPF profile
-    if (GetAdpfProfile()) {
-        header = "========== Begin current adpf profile ==========\n";
+    if (IsAdpfSupported()) {
+        header = "========== ADPF Tag Profile begin ==========\n";
         if (!android::base::WriteStringToFd(header, fd)) {
             LOG(ERROR) << "Failed to dump fd: " << fd;
         }
-        GetAdpfProfile()->dumpToFd(fd);
-        footer = "==========  End current adpf profile  ==========\n";
+        // TODO(jimmyshiu@/guibing@): Update it when fully switched to the tag based adpf profiles.
+        GetAdpfProfileFromDoHint()->dumpToFd(fd);
+        footer = "========== ADPF Tag Profile end ==========\n";
         if (!android::base::WriteStringToFd(footer, fd)) {
+            LOG(ERROR) << "Failed to dump fd: " << fd;
+        }
+    } else {
+        header = "========== IsAdpfSupported: No ===========\n";
+        if (!android::base::WriteStringToFd(header, fd)) {
             LOG(ERROR) << "Failed to dump fd: " << fd;
         }
     }
@@ -281,36 +293,49 @@ bool HintManager::Start() {
     return nm_->Start();
 }
 
-std::shared_ptr<HintManager> HintManager::mInstance = nullptr;
+std::unique_ptr<HintManager> HintManager::sInstance = nullptr;
 
-std::shared_ptr<HintManager> HintManager::Reload(bool start) {
+void HintManager::Reload(bool start) {
     std::string config_path = "/vendor/etc/";
     if (android::base::GetBoolProperty(kConfigDebugPathProperty.data(), false)) {
         config_path = "/data/vendor/etc/";
         LOG(WARNING) << "Pixel Power HAL AIDL Service is using debug config from: " << config_path;
     }
-    config_path.append(
-            android::base::GetProperty(kConfigProperty.data(), kConfigDefaultFileName.data()));
+    config_path.append(GetProperty(kConfigProperty.data(), kConfigDefaultFileName.data()));
 
     LOG(INFO) << "Pixel Power HAL AIDL Service with Extension is starting with config: "
               << config_path;
     // Reload and start the HintManager
-    mInstance = HintManager::GetFromJSON(config_path, start);
-    if (!mInstance) {
+    HintManager::GetFromJSON(config_path, start);
+    if (!sInstance) {
         LOG(FATAL) << "Invalid config: " << config_path;
     }
-    return mInstance;
 }
 
-std::shared_ptr<HintManager> HintManager::GetInstance() {
-    if (!mInstance) {
-        mInstance = HintManager::Reload(false);
+HintManager *HintManager::GetInstance() {
+    if (sInstance == nullptr) {
+        HintManager::Reload(false);
     }
-    return mInstance;
+    return sInstance.get();
 }
 
-std::unique_ptr<HintManager> HintManager::GetFromJSON(
-    const std::string& config_path, bool start) {
+static std::optional<std::string> ParseGpuSysfsNode(const std::string &json_doc) {
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    std::string errorMessage;
+    if (!reader->parse(&*json_doc.begin(), &*json_doc.end(), &root, &errorMessage)) {
+        LOG(ERROR) << "Failed to parse JSON config: " << errorMessage;
+        return {};
+    }
+
+    if (root["GpuSysfsPath"].empty() || !root["GpuSysfsPath"].isString()) {
+        return {};
+    }
+    return {root["GpuSysfsPath"].asString()};
+}
+
+HintManager *HintManager::GetFromJSON(const std::string &config_path, bool start) {
     std::string json_doc;
 
     if (!android::base::ReadFileToString(config_path, &json_doc)) {
@@ -330,15 +355,44 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
 
     std::unordered_map<std::string, Hint> actions = HintManager::ParseActions(json_doc, nodes);
 
+    // Parse ADPF Event Node
+    std::unordered_map<std::string, std::shared_ptr<AdpfConfig>> tag_adpfs;
+    LOG(VERBOSE) << "Parse ADPF Hint Event Table from all nodes.";
+    for (std::size_t i = 0; i < nodes.size(); ++i) {
+        const std::string &node_name = nodes[i]->GetName();
+        const std::string &node_path = nodes[i]->GetPath();
+        if (node_path.starts_with(kAdpfEventNodePath)) {
+            std::string tag = node_path.substr(strlen(kAdpfEventNodePath));
+            std::size_t index = nodes[i]->GetDefaultIndex();
+            std::string profile_name = nodes[i]->GetValues()[index];
+            for (std::size_t j = 0; j < adpfs.size(); ++j) {
+                if (adpfs[j]->mName == profile_name) {
+                    tag_adpfs[tag] = adpfs[j];
+                    LOG(INFO) << "[" << tag << ":" << node_name << "] set to '" << profile_name
+                              << "'";
+                    break;
+                }
+            }
+            if (!tag_adpfs[tag]) {
+                tag_adpfs[tag] = adpfs[0];
+                LOG(INFO) << "[" << tag << ":" << node_name << "] fallback to '" << adpfs[0]->mName
+                          << "'";
+            }
+        }
+    }
+
     if (actions.empty()) {
         LOG(ERROR) << "Failed to parse Actions section from " << config_path;
         return nullptr;
     }
 
-    sp<NodeLooperThread> nm = new NodeLooperThread(std::move(nodes));
-    std::unique_ptr<HintManager> hm = std::make_unique<HintManager>(std::move(nm), actions, adpfs);
+    auto const gpu_sysfs_node = ParseGpuSysfsNode(json_doc);
 
-    if (!HintManager::InitHintStatus(hm)) {
+    sp<NodeLooperThread> nm = new NodeLooperThread(std::move(nodes));
+    sInstance =
+            std::make_unique<HintManager>(std::move(nm), actions, adpfs, tag_adpfs, gpu_sysfs_node);
+
+    if (!HintManager::InitHintStatus(sInstance)) {
         LOG(ERROR) << "Failed to initialize hint status";
         return nullptr;
     }
@@ -346,13 +400,13 @@ std::unique_ptr<HintManager> HintManager::GetFromJSON(
     LOG(INFO) << "Initialized HintManager from JSON config: " << config_path;
 
     if (start) {
-        hm->Start();
+        sInstance->Start();
     }
-    return hm;
+
+    return HintManager::GetInstance();
 }
 
-std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
-    const std::string& json_doc) {
+std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(const std::string &json_doc) {
     // function starts
     std::vector<std::unique_ptr<Node>> nodes_parsed;
     std::set<std::string> nodes_name_parsed;
@@ -401,12 +455,16 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
             return nodes_parsed;
         }
 
-        bool is_file = true;
+        bool is_event_node = false;
+        bool is_file = false;
         std::string node_type = nodes[i]["Type"].asString();
         LOG(VERBOSE) << "Node[" << i << "]'s Type: " << node_type;
         if (node_type.empty()) {
+            is_file = true;
             LOG(VERBOSE) << "Failed to read "
                          << "Node[" << i << "]'s Type, set to 'File' as default";
+        } else if (node_type == "Event") {
+            is_event_node = true;
         } else if (node_type == "File") {
             is_file = true;
         } else if (node_type == "Property") {
@@ -475,7 +533,15 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
         LOG(VERBOSE) << "Node[" << i << "]'s ResetOnInit: " << std::boolalpha
                      << reset << std::noboolalpha;
 
-        if (is_file) {
+        if (is_event_node) {
+            auto update_callback = [](const std::string &name, const std::string &path,
+                                      const std::string &val) {
+                HintManager::GetInstance()->OnNodeUpdate(name, path, val);
+            };
+            nodes_parsed.emplace_back(std::make_unique<EventNode>(
+                    name, path, values_parsed, static_cast<std::size_t>(default_index), reset,
+                    update_callback));
+        } else if (is_file) {
             bool truncate = android::base::GetBoolProperty(kPowerHalTruncateProp, true);
             if (nodes[i]["Truncate"].empty() || !nodes[i]["Truncate"].isBool()) {
                 LOG(INFO) << "Failed to read Node[" << i << "]'s Truncate, set to 'true'";
@@ -510,8 +576,7 @@ std::vector<std::unique_ptr<Node>> HintManager::ParseNodes(
                     truncate, hold_fd, write_only));
         } else {
             nodes_parsed.emplace_back(std::make_unique<PropertyNode>(
-                name, path, values_parsed,
-                static_cast<std::size_t>(default_index), reset));
+                    name, path, values_parsed, static_cast<std::size_t>(default_index), reset));
         }
     }
     LOG(INFO) << nodes_parsed.size() << " Nodes parsed successfully";
@@ -654,6 +719,14 @@ std::unordered_map<std::string, Hint> HintManager::ParseActions(
     }                                                                                            \
     VARIABLE = adpfs[i][ENTRY].as##TYPE()
 
+#define ADPF_PARSE_OPTIONAL(VARIABLE, ENTRY, TYPE)                     \
+    static_assert(std::is_same<decltype(adpfs[i][ENTRY].as##TYPE()),   \
+                               decltype(VARIABLE)::value_type>::value, \
+                  "Parser type mismatch");                             \
+    if (!adpfs[i][ENTRY].empty() && adpfs[i][ENTRY].is##TYPE()) {      \
+        VARIABLE = adpfs[i][ENTRY].as##TYPE();                         \
+    }
+
 std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         const std::string &json_doc) {
     // function starts
@@ -676,6 +749,7 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     double staleTimeFactor;
     uint64_t reportingRate;
     double targetTimeFactor;
+
     std::vector<std::shared_ptr<AdpfConfig>> adpfs_parsed;
     std::set<std::string> name_parsed;
     Json::Value root;
@@ -688,6 +762,9 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
     }
     Json::Value adpfs = root["AdpfConfig"];
     for (Json::Value::ArrayIndex i = 0; i < adpfs.size(); ++i) {
+        std::optional<bool> gpuBoost;
+        std::optional<uint64_t> gpuBoostCapacityMax;
+        uint64_t gpuCapacityLoadUpHeadroom = 0;
         std::string name = adpfs[i]["Name"].asString();
         LOG(VERBOSE) << "AdpfConfig[" << i << "]'s Name: " << name;
         if (name.empty()) {
@@ -703,6 +780,23 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
             return adpfs_parsed;
         }
 
+        // heuristic boost configs
+        std::optional<bool> heuristicBoostOn;
+        std::optional<uint32_t> hBoostModerateJankThreshold;
+        std::optional<double> hBoostOffMaxAvgDurRatio;
+        std::optional<double> hBoostSevereJankPidPu;
+        std::optional<uint32_t> hBoostSevereJankThreshold;
+        std::optional<std::pair<uint32_t, uint32_t>> hBoostUclampMinCeilingRange;
+        std::optional<std::pair<uint32_t, uint32_t>> hBoostUclampMinFloorRange;
+        std::optional<double> jankCheckTimeFactor;
+        std::optional<uint32_t> lowFrameRateThreshold;
+        std::optional<uint32_t> maxRecordsNum;
+
+        std::optional<uint32_t> uclampMinLoadUp;
+        std::optional<uint32_t> uclampMinLoadReset;
+        std::optional<int32_t> uclampMaxEfficientBase;
+        std::optional<int32_t> uclampMaxEfficientOffset;
+
         ADPF_PARSE(pidOn, "PID_On", Bool);
         ADPF_PARSE(pidPOver, "PID_Po", Double);
         ADPF_PARSE(pidPUnder, "PID_Pu", Double);
@@ -714,6 +808,8 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(pidDUnder, "PID_Du", Double);
         ADPF_PARSE(adpfUclamp, "UclampMin_On", Bool);
         ADPF_PARSE(uclampMinInit, "UclampMin_Init", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadUp, "UclampMin_LoadUp", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMinLoadReset, "UclampMin_LoadReset", UInt);
         ADPF_PARSE(uclampMinHighLimit, "UclampMin_High", UInt);
         ADPF_PARSE(uclampMinLowLimit, "UclampMin_Low", UInt);
         ADPF_PARSE(samplingWindowP, "SamplingWindow_P", UInt64);
@@ -722,31 +818,147 @@ std::vector<std::shared_ptr<AdpfConfig>> HintManager::ParseAdpfConfigs(
         ADPF_PARSE(staleTimeFactor, "StaleTimeFactor", Double);
         ADPF_PARSE(reportingRate, "ReportingRateLimitNs", UInt64);
         ADPF_PARSE(targetTimeFactor, "TargetTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(heuristicBoostOn, "HeuristicBoost_On", Bool);
+        ADPF_PARSE_OPTIONAL(hBoostModerateJankThreshold, "HBoostModerateJankThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(hBoostOffMaxAvgDurRatio, "HBoostOffMaxAvgDurRatio", Double);
+        ADPF_PARSE_OPTIONAL(hBoostSevereJankPidPu, "HBoostSevereJankPidPu", Double);
+        ADPF_PARSE_OPTIONAL(hBoostSevereJankThreshold, "HBoostSevereJankThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(jankCheckTimeFactor, "JankCheckTimeFactor", Double);
+        ADPF_PARSE_OPTIONAL(lowFrameRateThreshold, "LowFrameRateThreshold", UInt);
+        ADPF_PARSE_OPTIONAL(maxRecordsNum, "MaxRecordsNum", UInt);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientBase, "UclampMax_EfficientBase", Int);
+        ADPF_PARSE_OPTIONAL(uclampMaxEfficientOffset, "UclampMax_EfficientOffset", Int);
+
+        if (!adpfs[i]["GpuBoost"].empty() && adpfs[i]["GpuBoost"].isBool()) {
+            gpuBoost = adpfs[i]["GpuBoost"].asBool();
+        }
+        if (!adpfs[i]["GpuCapacityBoostMax"].empty() &&
+            adpfs[i]["GpuCapacityBoostMax"].isUInt64()) {
+            gpuBoostCapacityMax = adpfs[i]["GpuCapacityBoostMax"].asUInt64();
+        }
+        if (!adpfs[i]["GpuCapacityLoadUpHeadroom"].empty() &&
+            adpfs[i]["GpuCapacityLoadUpHeadroom"].isUInt64()) {
+            gpuCapacityLoadUpHeadroom = adpfs[i]["GpuCapacityLoadUpHeadroom"].asUInt64();
+        }
+
+        if (!adpfs[i]["HBoostUclampMinCeilingRange"].empty()) {
+            Json::Value ceilRange = adpfs[i]["HBoostUclampMinCeilingRange"];
+            if (ceilRange.size() == 2 && ceilRange[0].isUInt() && ceilRange[1].isUInt()) {
+                hBoostUclampMinCeilingRange =
+                        std::make_pair(ceilRange[0].asUInt(), ceilRange[1].asUInt());
+            }
+        }
+
+        if (!adpfs[i]["HBoostUclampMinFloorRange"].empty()) {
+            Json::Value floorRange = adpfs[i]["HBoostUclampMinFloorRange"];
+            if (floorRange.size() == 2 && floorRange[0].isUInt() && floorRange[1].isUInt()) {
+                hBoostUclampMinFloorRange =
+                        std::make_pair(floorRange[0].asUInt(), floorRange[1].asUInt());
+            }
+        }
+
+        // Check all the heuristic configurations are there if heuristic boost is going to
+        // be used.
+        if (heuristicBoostOn.has_value()) {
+            if (!hBoostModerateJankThreshold.has_value() || !hBoostOffMaxAvgDurRatio.has_value() ||
+                !hBoostSevereJankPidPu.has_value() || !hBoostSevereJankThreshold.has_value() ||
+                !hBoostUclampMinCeilingRange.has_value() ||
+                !hBoostUclampMinFloorRange.has_value() || !jankCheckTimeFactor.has_value() ||
+                !lowFrameRateThreshold.has_value() || !maxRecordsNum.has_value()) {
+                LOG(ERROR) << "Part of the heuristic boost configurations are missing!";
+                adpfs_parsed.clear();
+                return adpfs_parsed;
+            }
+        }
+
+        if (uclampMaxEfficientBase.has_value() != uclampMaxEfficientBase.has_value()) {
+            LOG(ERROR) << "Part of the power efficiency configuration is missing!";
+            adpfs_parsed.clear();
+            return adpfs_parsed;
+        }
+
+        if (!uclampMinLoadUp.has_value()) {
+            uclampMinLoadUp = uclampMinHighLimit;
+        }
+        if (!uclampMinLoadReset.has_value()) {
+            uclampMinLoadReset = uclampMinHighLimit;
+        }
 
         adpfs_parsed.emplace_back(std::make_shared<AdpfConfig>(
                 name, pidOn, pidPOver, pidPUnder, pidI, pidIInit, pidIHighLimit, pidILowLimit,
                 pidDOver, pidDUnder, adpfUclamp, uclampMinInit, uclampMinHighLimit,
                 uclampMinLowLimit, samplingWindowP, samplingWindowI, samplingWindowD, reportingRate,
-                targetTimeFactor, staleTimeFactor));
+                targetTimeFactor, staleTimeFactor, gpuBoost, gpuBoostCapacityMax,
+                gpuCapacityLoadUpHeadroom, heuristicBoostOn, hBoostModerateJankThreshold,
+                hBoostOffMaxAvgDurRatio, hBoostSevereJankPidPu, hBoostSevereJankThreshold,
+                hBoostUclampMinCeilingRange, hBoostUclampMinFloorRange, jankCheckTimeFactor,
+                lowFrameRateThreshold, maxRecordsNum, uclampMinLoadUp.value(),
+                uclampMinLoadReset.value(), uclampMaxEfficientBase, uclampMaxEfficientOffset));
     }
     LOG(INFO) << adpfs_parsed.size() << " AdpfConfigs parsed successfully";
     return adpfs_parsed;
 }
 
-std::shared_ptr<AdpfConfig> HintManager::GetAdpfProfile() const {
+// TODO(jimmyshiu@): Deprecated. Remove once all powerhint.json up-to-date.
+std::shared_ptr<AdpfConfig> HintManager::GetAdpfProfileFromDoHint() const {
     if (adpfs_.empty())
         return nullptr;
     return adpfs_[adpf_index_];
 }
 
-bool HintManager::SetAdpfProfile(const std::string &profile_name) {
+// TODO(jimmyshiu@): Deprecated. Remove once all powerhint.json up-to-date.
+bool HintManager::SetAdpfProfileFromDoHint(const std::string &profile_name) {
     for (std::size_t i = 0; i < adpfs_.size(); ++i) {
         if (adpfs_[i]->mName == profile_name) {
-            adpf_index_ = i;
+            if (adpf_index_ != i) {
+                ATRACE_NAME(StringPrintf("%s %s:%s", __func__, adpfs_[adpf_index_]->mName.c_str(),
+                                         profile_name.c_str())
+                                    .c_str());
+                adpf_index_ = i;
+            }
             return true;
         }
     }
     return false;
+}
+
+bool HintManager::IsAdpfSupported() const {
+    return !adpfs_.empty();
+}
+
+std::shared_ptr<AdpfConfig> HintManager::GetAdpfProfile(const std::string &tag) const {
+    if (adpfs_.empty())
+        return nullptr;
+    if (tag_profile_map_.find(tag) == tag_profile_map_.end()) {
+        // TODO(jimmyshiu@): `return adpfs_[0]` once the GetAdpfProfileFromDoHint() retired.
+        return GetAdpfProfileFromDoHint();
+    }
+    return tag_profile_map_.at(tag);
+}
+
+bool HintManager::SetAdpfProfile(const std::string &tag, const std::string &profile) {
+    if (tag_profile_map_.find(tag) == tag_profile_map_.end()) {
+        LOG(WARNING) << "SetAdpfProfile('" << tag << "', " << profile << ") Invalidate Tag!!!";
+        return false;
+    }
+    if (tag_profile_map_[tag]->mName == profile) {
+        LOG(VERBOSE) << "SetAdpfProfile:(" << tag << ", " << profile << ") value not changed!";
+        return true;
+    }
+
+    bool updated = false;
+    for (std::size_t i = 0; i < adpfs_.size(); ++i) {
+        if (adpfs_[i]->mName == profile) {
+            LOG(DEBUG) << "SetAdpfProfile('" << tag << "', '" << profile << "') Done!";
+            tag_profile_map_[tag] = adpfs_[i];
+            updated = true;
+            break;
+        }
+    }
+    if (!updated) {
+        LOG(WARNING) << "SetAdpfProfile(" << tag << ") failed to find profile:'" << profile << "'";
+    }
+    return updated;
 }
 
 bool HintManager::IsAdpfProfileSupported(const std::string &profile_name) const {
@@ -756,6 +968,47 @@ bool HintManager::IsAdpfProfileSupported(const std::string &profile_name) const 
         }
     }
     return false;
+}
+
+void HintManager::OnNodeUpdate(const std::string &name,
+                               __attribute__((unused)) const std::string &path,
+                               const std::string &value) {
+    // Check if the node is to update ADPF.
+    if (path.starts_with(kAdpfEventNodePath)) {
+        std::string tag = path.substr(strlen(kAdpfEventNodePath));
+        bool updated = SetAdpfProfile(tag, value);
+        if (!updated) {
+            LOG(DEBUG) << "OnNodeUpdate:[" << name << "] failed to update '" << value << "'";
+            return;
+        }
+        auto &callback_list = tag_update_callback_list_[tag];
+        for (const auto &callback : callback_list) {
+            (*callback)(tag_profile_map_[tag]);
+        }
+    }
+}
+
+void HintManager::RegisterAdpfUpdateEvent(const std::string &tag, AdpfCallback *update_adpf_func) {
+    tag_update_callback_list_[tag].push_back(update_adpf_func);
+}
+
+void HintManager::UnregisterAdpfUpdateEvent(const std::string &tag,
+                                            AdpfCallback *update_adpf_func) {
+    auto &callback_list = tag_update_callback_list_[tag];
+    // Use std::find to locate the function object
+    auto it = std::find_if(
+            callback_list.begin(), callback_list.end(),
+            [update_adpf_func](const std::function<void(const std::shared_ptr<AdpfConfig>)> *func) {
+                return func == update_adpf_func;
+            });
+    if (it != callback_list.end()) {
+        // Erase the found function object
+        callback_list.erase(it);
+    }
+}
+
+std::optional<std::string> HintManager::gpu_sysfs_config_path() const {
+    return gpu_sysfs_config_path_;
 }
 
 }  // namespace perfmgr

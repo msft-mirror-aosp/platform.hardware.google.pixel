@@ -51,7 +51,9 @@ using android::hardware::google::pixel::PixelAtoms::BatteryCapacity;
 using android::hardware::google::pixel::PixelAtoms::BlockStatsReported;
 using android::hardware::google::pixel::PixelAtoms::BootStatsInfo;
 using android::hardware::google::pixel::PixelAtoms::DisplayPanelErrorStats;
+using android::hardware::google::pixel::PixelAtoms::DisplayPortDSCSupportCountStatsReported;
 using android::hardware::google::pixel::PixelAtoms::DisplayPortErrorStats;
+using android::hardware::google::pixel::PixelAtoms::DisplayPortMaxResolutionCountStatsReported;
 using android::hardware::google::pixel::PixelAtoms::F2fsAtomicWriteInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsCompressionInfo;
 using android::hardware::google::pixel::PixelAtoms::F2fsGcSegmentInfo;
@@ -123,6 +125,8 @@ SysfsCollector::SysfsCollector(const struct SysfsPaths &sysfs_paths)
       kWifiPcieLinkStatsPath(sysfs_paths.WifiPcieLinkStatsPath),
       kDisplayStatsPaths(sysfs_paths.DisplayStatsPaths),
       kDisplayPortStatsPaths(sysfs_paths.DisplayPortStatsPaths),
+      kDisplayPortDSCStatsPaths(sysfs_paths.DisplayPortDSCStatsPaths),
+      kDisplayPortMaxResolutionStatsPaths(sysfs_paths.DisplayPortMaxResolutionStatsPaths),
       kHDCPStatsPaths(sysfs_paths.HDCPStatsPaths),
       kPDMStatePath(sysfs_paths.PDMStatePath),
       kWavesPath(sysfs_paths.WavesPath),
@@ -135,7 +139,10 @@ SysfsCollector::SysfsCollector(const struct SysfsPaths &sysfs_paths)
       kOffloadEffectsDurationPath(sysfs_paths.OffloadEffectsDurationPath),
       kBluetoothAudioUsagePath(sysfs_paths.BluetoothAudioUsagePath),
       kGMSRPath(sysfs_paths.GMSRPath),
-      kMaxfgHistoryPath("/dev/maxfg_history") {}
+      kMaxfgHistoryPath("/dev/maxfg_history"),
+      kFGModelLoadingPath(sysfs_paths.FGModelLoadingPath),
+      kFGLogBufferPath(sysfs_paths.FGLogBufferPath),
+      kSpeakerVersionPath(sysfs_paths.SpeakerVersionPath) {}
 
 bool SysfsCollector::ReadFileToInt(const std::string &path, int *val) {
     return ReadFileToInt(path.c_str(), val);
@@ -209,8 +216,22 @@ void SysfsCollector::logBatteryEEPROM(const std::shared_ptr<IStats> &stats_clien
     }
 
     battery_EEPROM_reporter_.checkAndReportGMSR(stats_client, kGMSRPath);
-
     battery_EEPROM_reporter_.checkAndReportMaxfgHistory(stats_client, kMaxfgHistoryPath);
+    battery_EEPROM_reporter_.checkAndReportFGModelLoading(stats_client, kFGModelLoadingPath);
+    battery_EEPROM_reporter_.checkAndReportFGLearning(stats_client, kFGLogBufferPath);
+}
+
+/**
+ * Log battery history validation
+ */
+void SysfsCollector::logBatteryHistoryValidation() {
+    const std::shared_ptr<IStats> stats_client = getStatsService();
+    if (!stats_client) {
+        ALOGE("Unable to get AIDL Stats service");
+        return;
+    }
+
+    battery_EEPROM_reporter_.checkAndReportValidation(stats_client, kFGLogBufferPath);
 }
 
 /**
@@ -218,6 +239,13 @@ void SysfsCollector::logBatteryEEPROM(const std::shared_ptr<IStats> &stats_clien
  */
 void SysfsCollector::logBatteryHealth(const std::shared_ptr<IStats> &stats_client) {
     battery_health_reporter_.checkAndReportStatus(stats_client);
+}
+
+/**
+ * Log battery time-to-full stats
+ */
+void SysfsCollector::logBatteryTTF(const std::shared_ptr<IStats> &stats_client) {
+    battery_time_to_full_reporter_.checkAndReportStats(stats_client);
 }
 
 /**
@@ -346,7 +374,7 @@ void SysfsCollector::logSpeakerHealthStats(const std::shared_ptr<IStats> &stats_
     std::string file_contents_temperature;
     std::string file_contents_excursion;
     std::string file_contents_heartbeat;
-    int count, i;
+    int count, i, version = 0;
     float impedance_ohm[4];
     float temperature_C[4];
     float excursion_mm[4];
@@ -384,9 +412,19 @@ void SysfsCollector::logSpeakerHealthStats(const std::shared_ptr<IStats> &stats_
         return;
     }
 
+    if (kSpeakerVersionPath == nullptr || strlen(kSpeakerVersionPath) == 0) {
+        ALOGD("Audio speaker version path not specified. Keep version 0");
+    } else if (!ReadFileToInt(kSpeakerVersionPath, &version)) {
+        ALOGD("Unable to read version. Keep version 0");
+    }
+
     count = sscanf(file_contents_impedance.c_str(), "%g,%g,%g,%g", &impedance_ohm[0],
                    &impedance_ohm[1], &impedance_ohm[2], &impedance_ohm[3]);
     if (count <= 0)
+        return;
+
+    if (impedance_ohm[0] == 0 && impedance_ohm[1] == 0 && impedance_ohm[2] == 0 &&
+        impedance_ohm[3] == 0)
         return;
 
     count = sscanf(file_contents_temperature.c_str(), "%g,%g,%g,%g", &temperature_C[0],
@@ -411,6 +449,7 @@ void SysfsCollector::logSpeakerHealthStats(const std::shared_ptr<IStats> &stats_
         obj[i].set_max_temperature(static_cast<int32_t>(temperature_C[i] * 1000));
         obj[i].set_excursion(static_cast<int32_t>(excursion_mm[i] * 1000));
         obj[i].set_heartbeat(static_cast<int32_t>(heartbeat[i]));
+        obj[i].set_version(version);
 
         reportSpeakerHealthStat(stats_client, obj[i]);
     }
@@ -435,6 +474,15 @@ void SysfsCollector::logThermalStats(const std::shared_ptr<IStats> &stats_client
     thermal_stats_reporter_.logThermalStats(stats_client, kThermalStatsPaths);
 }
 
+void SysfsCollector::logDisplayPortDSCStats(const std::shared_ptr<IStats> &stats_client) {
+    display_stats_reporter_.logDisplayStats(stats_client, kDisplayPortDSCStatsPaths,
+                                            DisplayStatsReporter::DISP_PORT_DSC_STATE);
+}
+
+void SysfsCollector::logDisplayPortMaxResolutionStats(const std::shared_ptr<IStats> &stats_client) {
+    display_stats_reporter_.logDisplayStats(stats_client, kDisplayPortMaxResolutionStatsPaths,
+                                            DisplayStatsReporter::DISP_PORT_MAX_RES_STATE);
+}
 /**
  * Report the Speech DSP state.
  */
@@ -2078,11 +2126,15 @@ void SysfsCollector::logPerDay() {
     logBatteryChargeCycles(stats_client);
     logBatteryEEPROM(stats_client);
     logBatteryHealth(stats_client);
+    logBatteryTTF(stats_client);
+    logBatteryHistoryValidation();
     logBlockStatsReported(stats_client);
     logCodec1Failed(stats_client);
     logCodecFailed(stats_client);
     logDisplayStats(stats_client);
     logDisplayPortStats(stats_client);
+    logDisplayPortDSCStats(stats_client);
+    logDisplayPortMaxResolutionStats(stats_client);
     logHDCPStats(stats_client);
     logF2fsStats(stats_client);
     logF2fsAtomicWriteInfo(stats_client);
@@ -2097,6 +2149,7 @@ void SysfsCollector::logPerDay() {
     logSpeakerHealthStats(stats_client);
     mm_metrics_reporter_.logCmaStatus(stats_client);
     mm_metrics_reporter_.logPixelMmMetricsPerDay(stats_client);
+    mm_metrics_reporter_.logGcmaPerDay(stats_client);
     logVendorAudioHardwareStats(stats_client);
     logThermalStats(stats_client);
     logTempResidencyStats(stats_client);
@@ -2142,6 +2195,8 @@ void SysfsCollector::logPerHour() {
         return;
     }
     mm_metrics_reporter_.logPixelMmMetricsPerHour(stats_client);
+    mm_metrics_reporter_.logGcmaPerHour(stats_client);
+    mm_metrics_reporter_.logMmProcessUsageByOomGroupSnapshot(stats_client);
     logZramStats(stats_client);
     if (kPowerMitigationStatsPath != nullptr && strlen(kPowerMitigationStatsPath) > 0)
         mitigation_stats_reporter_.logMitigationStatsPerHour(stats_client,
@@ -2193,6 +2248,7 @@ void SysfsCollector::collect(void) {
         return;
     }
 
+    ALOGI("Time-series metrics were initiated.");
     while (1) {
         int readval;
         union {

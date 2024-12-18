@@ -55,6 +55,10 @@ static int Usage(std::string_view name) {
   std::cerr << "  --set-minrtc                  Write the minimum expected rtc value for tilb\n";
   std::cerr << "  --set-dsttransition           Write the next dst transition in the current timezone\n";
   std::cerr << "  --set-dstoffset               Write the time offset during the next dst transition\n";
+  std::cerr << "  --set-display-mode <mode>     Write the display mode at boot\n";
+  std::cerr << "  --clear-display-mode          Clear the display mode at boot\n";
+  std::cerr << "  --set-trending-issue-pattern <string within 2000 byte> Write a regex string";
+  std::cerr << "  --read-trending-issue-pattern Read eagleEye misc portion";
   std::cerr << "Writes the given hex string to the specified offset in vendor space in /misc "
                "partition.\nDefault offset is used for each action unless "
                "--override-vendor-space-offset is specified.\n";
@@ -81,6 +85,10 @@ int main(int argc, char** argv) {
     { "set-sota-config", no_argument, nullptr, 0 },
     { "set-dsttransition", required_argument, nullptr, 0},
     { "set-dstoffset", required_argument, nullptr, 0 },
+    { "set-display-mode", required_argument, nullptr, 0 },
+    { "clear-display-mode", no_argument, nullptr, 0 },
+    { "set-trending-issue-pattern", required_argument, nullptr, 0 },
+    { "read-trending-issue-pattern", no_argument, nullptr, 0 },
     { nullptr, 0, nullptr, 0 },
   };
 
@@ -93,6 +101,7 @@ int main(int argc, char** argv) {
     { "set-disable-pkvm", MiscWriterActions::kSetDisablePkvmFlag },
     { "clear-wrist-orientation", MiscWriterActions::kClearWristOrientationFlag },
     { "set-sota-config", MiscWriterActions::kSetSotaConfig },
+    { "clear-display-mode", MiscWriterActions::kClearDisplayMode },
   };
 
   std::unique_ptr<MiscWriter> misc_writer;
@@ -208,6 +217,17 @@ int main(int argc, char** argv) {
       }
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteTimeMinRtc,
                                                      std::to_string(minrtc));
+    } else if (option_name == "set-display-mode"s) {
+      std::string mode(optarg);
+      if (mode.size() > MiscWriter::kDisplayModeMaxSize) {
+        LOG(ERROR) << "Display mode too long:" << optarg;
+        return Usage(argv[0]);
+      }
+      if (misc_writer) {
+        LOG(ERROR) << "Misc writer action has already been set";
+        return Usage(argv[0]);
+      }
+      misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kSetDisplayMode, mode);
     } else if (auto iter = action_map.find(option_name); iter != action_map.end()) {
       if (misc_writer) {
         LOG(ERROR) << "Misc writer action has already been set";
@@ -238,6 +258,26 @@ int main(int argc, char** argv) {
       }
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteDstOffset,
                                                      std::to_string(dst_offset));
+    } else if (option_name == "set-trending-issue-pattern"s) {
+      if (argc != 3) {
+        std::cerr << "Not the right amount of arguements, we expect 1 argument but were provide " << argc - 2;
+        return EXIT_FAILURE;
+      }
+      if (misc_writer) {
+        LOG(ERROR) << "Misc writer action has already been set";
+        return Usage(argv[0]);
+      } else if (sizeof(argv[2]) >= 2000) {
+        std::cerr << "String is too large, we only take strings smaller than 2000, but you provide " << sizeof(argv[2]);
+        return Usage(argv[0]);
+      }
+      misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, argv[2]);
+    } else if (option_name == "read-trending-issue-pattern"s) {
+      if (misc_writer) {
+        LOG(ERROR) << "Misc writer action has already been set";
+        return Usage(argv[0]);
+      }
+      std::cerr << "function is not yet implemented";
+      return EXIT_SUCCESS;
     } else {
       LOG(FATAL) << "Unreachable path, option_name: " << option_name;
     }
