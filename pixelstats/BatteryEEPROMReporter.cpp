@@ -294,9 +294,7 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryEEPROM to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryEEPROMReporter::reportEventInt32(const std::shared_ptr<IStats> &stats_client,
@@ -340,9 +338,7 @@ void BatteryEEPROMReporter::reportEventInt32(const std::shared_ptr<IStats> &stat
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryEEPROM to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryEEPROMReporter::checkAndReportGMSR(const std::shared_ptr<IStats> &stats_client,
