@@ -57,6 +57,16 @@ std::shared_ptr<IStats> getStatsService() {
     return IStats::fromBinder(ndk::SpAIBinder(AServiceManager_waitForService(instance.c_str())));
 }
 
+void reportVendorAtom(const std::shared_ptr<IStats> &stats_client, VendorAtom event) {
+    // consecutive Atom calls should be at least 10 milliseconds apart
+    usleep(10000);
+    if (!stats_client->reportVendorAtom(event).isOk()) {
+        ALOGE("Unable to report %d to Stats service", event.atomId);
+        return;
+    }
+    ALOGD("reportVendorAtom id %d to Stats service", event.atomId);
+}
+
 void reportSpeakerImpedance(const std::shared_ptr<IStats> &stats_client,
                             const PixelAtoms::VendorSpeakerImpedance &speakerImpedance) {
     // Load values array

@@ -116,9 +116,7 @@ void BatteryTTFReporter::reportBatteryTTFStatsEvent(
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryTimeToFullStatsReported,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryTTFStats to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryTTFReporter::checkAndReportStats(const std::shared_ptr<IStats> &stats_client) {

@@ -26,6 +26,7 @@ namespace google {
 namespace pixel {
 
 using aidl::android::frameworks::stats::IStats;
+using aidl::android::frameworks::stats::VendorAtom;
 
 bool fileExists(const std::string &path);
 std::shared_ptr<IStats> getStatsService();
@@ -44,6 +45,8 @@ enum ReportEventFormat {
   FormatIgnoreAddr,
   FormatOnlyVal,
 };
+
+void reportVendorAtom(const std::shared_ptr<IStats> &stats_client, VendorAtom event);
 
 void reportSpeakerImpedance(const std::shared_ptr<IStats> &stats_client,
                             const PixelAtoms::VendorSpeakerImpedance &speakerImpedance);
