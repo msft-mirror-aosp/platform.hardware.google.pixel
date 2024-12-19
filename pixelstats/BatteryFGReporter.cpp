@@ -123,9 +123,7 @@ void BatteryFGReporter::reportAbnormalEvent(const std::shared_ptr<IStats> &stats
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kFuelGaugeAbnormalityReported,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report FuelGaugeAbnormalityReported to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryFGReporter::reportEvent(const std::shared_ptr<IStats> &stats_client,
@@ -208,9 +206,7 @@ void BatteryFGReporter::reportEvent(const std::shared_ptr<IStats> &stats_client,
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryEEPROM to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryFGReporter::checkAndReportFwUpdate(const std::shared_ptr<IStats> &stats_client,
