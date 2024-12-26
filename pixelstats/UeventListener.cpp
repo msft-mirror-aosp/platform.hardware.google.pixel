@@ -190,13 +190,19 @@ void UeventListener::ReportChargeMetricsEvent(const std::shared_ptr<IStats> &sta
 }
 
 void UeventListener::ReportFGMetricsEvent(const std::shared_ptr<IStats> &stats_client,
-                                              const char *driver) {
-    if (!driver || (strcmp(driver, "DRIVER=max77779-fg") && strcmp(driver, "DRIVER=maxfg") &&
-        strcmp(driver, "DRIVER=max1720x")))
+                                          const char *driver) {
+    if (!driver || strcmp(driver, "DRIVER=max77779-fg"))
         return;
 
-    battery_fg_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath);
     battery_fg_reporter_.checkAndReportFGAbnormality(stats_client, kFGAbnlPath);
+}
+
+void UeventListener::ReportFwUpdateEvent(const std::shared_ptr<IStats> &stats_client,
+                                         const char *driver) {
+    if (!driver || strcmp(driver, "DRIVER=max77779-fg"))
+        return;
+
+    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath);
 }
 
 /**
@@ -502,6 +508,7 @@ bool UeventListener::ProcessUevent() {
                                    thermal_abnormal_event_info);
         ReportFGMetricsEvent(stats_client, driver);
         ReportWaterEvent(stats_client, driver, devpath);
+        ReportFwUpdateEvent(stats_client, driver);
     }
 
     if (log_fd_ > 0) {
@@ -515,7 +522,7 @@ UeventListener::UeventListener(const std::string audio_uevent, const std::string
                                const std::string charge_metrics_path,
                                const std::string typec_partner_vid_path,
                                const std::string typec_partner_pid_path,
-                               const std::string fw_update_path,
+                               const std::vector<std::string> fw_update_path,
                                const std::vector<std::string> fg_abnl_path)
     : kAudioUevent(audio_uevent),
       kBatterySSOCPath(ssoc_details_path),
@@ -547,8 +554,7 @@ UeventListener::UeventListener(const struct UeventPaths &uevents_paths)
       kTypeCPartnerPidPath((uevents_paths.TypeCPartnerPidPath == nullptr)
                                    ? typec_partner_pid_path_default
                                    : uevents_paths.TypeCPartnerPidPath),
-      kFwUpdatePath((uevents_paths.FwUpdatePath == nullptr)
-                                   ? "" : uevents_paths.FwUpdatePath),
+      kFwUpdatePath(uevents_paths.FwUpdatePath),
       kFGAbnlPath(uevents_paths.FGAbnlPath),
       uevent_fd_(-1),
       log_fd_(-1) {}

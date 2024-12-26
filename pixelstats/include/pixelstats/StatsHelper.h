@@ -32,12 +32,13 @@ bool fileExists(const std::string &path);
 std::shared_ptr<IStats> getStatsService();
 
 enum ReportEventType {
-  EvtFGAbnormalEvent   = 0x4142, /* AB */
-  EvtFGLearningHistory = 0x4C48, /* LH */
-  EvtGMSR              = 0xFFFF, /* GMSR */
-  EvtModelLoading      = 0x4D4C, /* ML */
+  EvtFGAbnormalEvent = 0x4142,   /* AB */
+  EvtFwUpdate = 0x4655,          /* FU */
   EvtHistoryValidation = 0x4856, /* HV */
-  EvtFGRegularMonitor  = 0x524D, /* RM */
+  EvtFGLearningHistory = 0x4C48, /* LH */
+  EvtModelLoading = 0x4D4C,      /* ML */
+  EvtFGRegularMonitor = 0x524D,  /* RM */
+  EvtGMSR = 0xFFFF,              /* GMSR */
 };
 
 enum ReportEventFormat {
