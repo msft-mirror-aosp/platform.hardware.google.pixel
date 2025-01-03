@@ -44,7 +44,7 @@ on property:ro.debuggable=1 && property:sys.boot_completed=1
     chmod 0660 /sys/kernel/tracing/instances/pixel/trace
     chown system system /sys/kernel/tracing/instances/pixel/tracing_on
     chmod 0660 /sys/kernel/tracing/instances/pixel/tracing_on
-    write /sys/kernel/tracing/instances/pixel/buffer_size_kb 64
+    write /sys/kernel/tracing/instances/pixel/buffer_size_kb 7
     write /sys/kernel/tracing/instances/pixel/events/cma/cma_alloc_busy_retry/enable 1
     write /sys/kernel/tracing/instances/pixel/events/cma/cma_alloc_start/enable 1
     write /sys/kernel/tracing/instances/pixel/events/cma/cma_alloc_finish/enable 1
