@@ -79,6 +79,8 @@ class PowerSessionManager : public Immobile {
     void updateHboostStatistics(int64_t sessionId, SessionJankyLevel jankyLevel,
                                 int32_t numOfFrames);
 
+    void updateFrameBuckets(int64_t sessionId, const FrameBuckets &lastReportedFrames);
+
     // Singleton
     static PowerSessionManager *getInstance() {
         static PowerSessionManager instance{};
@@ -92,6 +94,7 @@ class PowerSessionManager : public Immobile {
     // Only for testing
     void clear();
     std::shared_ptr<void> getSession(int64_t sessionId);
+    bool getGameModeEnableState();
 
   private:
     std::optional<bool> isAnyAppSessionActive();
@@ -138,6 +141,10 @@ class PowerSessionManager : public Immobile {
 
     std::mutex mSessionMapMutex;
     std::unordered_map<int, std::weak_ptr<void>> mSessionMap GUARDED_BY(mSessionMapMutex);
+
+    std::atomic<bool> mGameModeEnabled{false};
+
+    std::string getSessionTaskProfile(int64_t sessionId, bool isSetProfile) const;
 };
 
 }  // namespace pixel

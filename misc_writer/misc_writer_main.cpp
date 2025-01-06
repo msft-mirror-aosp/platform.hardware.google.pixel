@@ -60,6 +60,7 @@ static int Usage(std::string_view name) {
   std::cerr << "  --set-trending-issue-pattern <string within 2000 byte> Write a regex string";
   std::cerr << "  --set-disable-faceauth-eval   Write disable-faceauth-eval flag\n";
   std::cerr << "  --clear-disable-faceauth-eval Clear disable-faceauth-eval flag\n";
+  std::cerr << "  --set-sota-boot      Set sota boot flag\n";
   std::cerr << "Writes the given hex string to the specified offset in vendor space in /misc "
                "partition.\nDefault offset is used for each action unless "
                "--override-vendor-space-offset is specified.\n";
@@ -91,6 +92,7 @@ int main(int argc, char** argv) {
     { "set-disable-faceauth-eval", no_argument, nullptr, 0 },
     { "clear-disable-faceauth-eval", no_argument, nullptr, 0 },
     { "set-trending-issue-pattern", required_argument, nullptr, 0 },
+    { "set-sota-boot", no_argument, nullptr, 0 },
     { nullptr, 0, nullptr, 0 },
   };
 
@@ -106,6 +108,7 @@ int main(int argc, char** argv) {
     { "clear-display-mode", MiscWriterActions::kClearDisplayMode },
     { "set-disable-faceauth-eval", MiscWriterActions::kSetDisableFaceauthEval },
     { "clear-disable-faceauth-eval", MiscWriterActions::kClearDisableFaceauthEval },
+    { "set-sota-boot", MiscWriterActions::kSetSotaBootFlag },
   };
 
   std::unique_ptr<MiscWriter> misc_writer;

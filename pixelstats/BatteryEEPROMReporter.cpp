@@ -40,8 +40,7 @@ using aidl::android::frameworks::stats::VendorAtomValue;
 using android::base::ReadFileToString;
 using android::hardware::google::pixel::PixelAtoms::BatteryEEPROM;
 
-#define LINESIZE 71
-#define LINESIZE_V2 31
+#define LINESIZE 31
 #define LINESIZE_MAX17201_HIST 80
 
 BatteryEEPROMReporter::BatteryEEPROMReporter() {}
@@ -88,128 +87,102 @@ void BatteryEEPROMReporter::checkAndReport(const std::shared_ptr<IStats> &stats_
         return;
     }
 
+    if (!ReadFileToString(path.c_str(), &file_contents)) {
+        ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
+        return;
+    }
+
+    const int kHistTotalLen = file_contents.size();
+    const int kHistTotalNum = kHistTotalLen / LINESIZE;
+    ALOGD("kHistTotalLen=%d, kHistTotalNum=%d\n", kHistTotalLen, kHistTotalNum);
+
+    /* TODO: wait for pa/2875004 merge
     if (ReadFileToString(cycle_count_path.c_str(), &cycle_count)) {
         int cnt;
 
         cycle_count = android::base::Trim(cycle_count);
         if (android::base::ParseInt(cycle_count, &cnt)) {
             cnt /= 10;
-            if (cnt > BATT_HIST_NUM_MAX_V2)
-                sparse_index_count = cnt % BATT_HIST_NUM_MAX_V2;
+            if (cnt > kHistTotalNum)
+                sparse_index_count = cnt % kHistTotalNum;
         }
 
         ALOGD("sparse_index_count %d cnt: %d cycle_count %s\n", sparse_index_count, cnt,
               cycle_count.c_str());
     }
+    */
 
-    if (!ReadFileToString(path.c_str(), &file_contents)) {
-        ALOGE("Unable to read %s - %s", path.c_str(), strerror(errno));
-        return;
-    }
-
-    int16_t i, num;
+    struct BatteryHistoryRawFormat hist_raw;
     struct BatteryHistory hist;
-    const int kHistTotalLen = file_contents.size();
-
-    ALOGD("kHistTotalLen=%d\n", kHistTotalLen);
+    int16_t i;
 
     ReadFileToInt(kBatteryPairingPath, &hist.battery_pairing);
 
-    if (kHistTotalLen >= (LINESIZE_V2 * BATT_HIST_NUM_MAX_V2)) {
-        struct BatteryHistoryExtend histv2;
-        for (i = 0; i < BATT_HIST_NUM_MAX_V2; i++) {
-            size_t history_offset = i * LINESIZE_V2;
-            if (history_offset > file_contents.size())
-                break;
-            history_each = file_contents.substr(history_offset, LINESIZE_V2);
-            unsigned int data[4];
-
-            /* Format transfer: go/gsx01-eeprom */
-            num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%x %x %x %x",
-                        &histv2.tempco, &histv2.rcomp0, &data[0], &data[1], &data[2], &data[3]);
-
-            if (histv2.tempco == 0xFFFF && histv2.rcomp0 == 0xFFFF)
-                continue;
-
-            /* Extract each data */
-            uint64_t tmp = (int64_t)data[3] << 48 |
-                           (int64_t)data[2] << 32 |
-                           (int64_t)data[1] << 16 |
-                           data[0];
-
-            /* ignore this data if unreasonable */
-            if (tmp <= 0)
-                continue;
-
-            /* data format/unit in go/gsx01-eeprom#heading=h.finy98ign34p */
-            histv2.timer_h = tmp & 0xFF;
-            histv2.fullcapnom = (tmp >>= 8) & 0x3FF;
-            histv2.fullcaprep = (tmp >>= 10) & 0x3FF;
-            histv2.mixsoc = (tmp >>= 10) & 0x3F;
-            histv2.vfsoc = (tmp >>= 6) & 0x3F;
-            histv2.maxvolt = (tmp >>= 6) & 0xF;
-            histv2.minvolt = (tmp >>= 4) & 0xF;
-            histv2.maxtemp = (tmp >>= 4) & 0xF;
-            histv2.mintemp = (tmp >>= 4) & 0xF;
-            histv2.maxchgcurr = (tmp >>= 4) & 0xF;
-            histv2.maxdischgcurr = (tmp >>= 4) & 0xF;
-
-            /* Mapping to original format to collect data */
-            /* go/pixel-battery-eeprom-atom#heading=h.dcawdjiz2ls6 */
-            hist.tempco = histv2.tempco;
-            hist.rcomp0 = histv2.rcomp0;
-            hist.timer_h = (uint8_t)histv2.timer_h * 5;
-            hist.max_temp = (int8_t)histv2.maxtemp * 3 + 22;
-            hist.min_temp = (int8_t)histv2.mintemp * 3 - 20;
-            hist.min_ibatt = (int16_t)histv2.maxchgcurr * 500 * (-1);
-            hist.max_ibatt = (int16_t)histv2.maxdischgcurr * 500;
-            hist.min_vbatt = (uint16_t)histv2.minvolt * 10 + 2500;
-            hist.max_vbatt = (uint16_t)histv2.maxvolt * 20 + 4200;
-            hist.batt_soc = (uint8_t)histv2.vfsoc * 2;
-            hist.msoc = (uint8_t)histv2.mixsoc * 2;
-            hist.full_cap = (int16_t)histv2.fullcaprep * 125 / 1000;
-            hist.full_rep = (int16_t)histv2.fullcapnom * 125 / 1000;
-
-            /* i < sparse_index_count: 20 40 60 80  */
-            if (i < sparse_index_count)
-                hist.cycle_cnt = (i + 1) * 20;
-            else
-                hist.cycle_cnt = (i + sparse_index_count + 1) * 10;
-
-            reportEvent(stats_client, hist);
-            report_time_ = getTimeSecs();
-        }
-        return;
-    }
-
-    for (i = 0; i < (LINESIZE * BATT_HIST_NUM_MAX); i = i + LINESIZE) {
-        if (i + LINESIZE > kHistTotalLen)
+    for (i = 0; i < kHistTotalNum; i++) {
+        size_t history_offset = i * LINESIZE;
+        if (history_offset + LINESIZE > kHistTotalLen)
             break;
-        history_each = file_contents.substr(i, LINESIZE);
-        num = sscanf(history_each.c_str(),
-                   "%4" SCNx16 "%4" SCNx16 "%4" SCNx16 "%4" SCNx16
-                   "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
-                   "%2" SCNx8 "%2" SCNx8 " %2" SCNx8 "%2" SCNx8
-                   "%2" SCNx8 "%2" SCNx8 " %4" SCNx16 "%4" SCNx16
-                   "%4" SCNx16 "%4" SCNx16 "%4" SCNx16,
-                   &hist.cycle_cnt, &hist.full_cap, &hist.esr,
-                   &hist.rslow, &hist.batt_temp, &hist.soh,
-                   &hist.cc_soc, &hist.cutoff_soc, &hist.msoc,
-                   &hist.sys_soc, &hist.reserve, &hist.batt_soc,
-                   &hist.min_temp, &hist.max_temp,  &hist.max_vbatt,
-                   &hist.min_vbatt, &hist.max_ibatt, &hist.min_ibatt,
-                   &hist.checksum);
+        history_each = file_contents.substr(history_offset, LINESIZE);
+        unsigned int data[4];
 
-        if (num != kNumBatteryHistoryFields) {
-            ALOGE("Couldn't process %s", history_each.c_str());
+        /* Format transfer: go/gsx01-eeprom */
+        int16_t num = sscanf(history_each.c_str(), "%4" SCNx16 "%4" SCNx16 "%x %x %x %x",
+                      &hist_raw.tempco, &hist_raw.rcomp0, &data[0], &data[1], &data[2], &data[3]);
+        if (num <= 0)
             continue;
-        }
 
-        if (checkLogEvent(hist)) {
-            reportEvent(stats_client, hist);
-            report_time_ = getTimeSecs();
-        }
+        if (hist_raw.tempco == 0xFFFF && hist_raw.rcomp0 == 0xFFFF)
+            continue;
+
+        /* Extract each data */
+        uint64_t tmp = (int64_t)data[3] << 48 |
+                       (int64_t)data[2] << 32 |
+                       (int64_t)data[1] << 16 |
+                       data[0];
+
+        /* ignore this data if unreasonable */
+        if (tmp <= 0)
+            continue;
+
+        /* data format/unit in go/gsx01-eeprom#heading=h.finy98ign34p */
+        hist_raw.timer_h = tmp & 0xFF;
+        hist_raw.fullcapnom = (tmp >>= 8) & 0x3FF;
+        hist_raw.fullcaprep = (tmp >>= 10) & 0x3FF;
+        hist_raw.mixsoc = (tmp >>= 10) & 0x3F;
+        hist_raw.vfsoc = (tmp >>= 6) & 0x3F;
+        hist_raw.maxvolt = (tmp >>= 6) & 0xF;
+        hist_raw.minvolt = (tmp >>= 4) & 0xF;
+        hist_raw.maxtemp = (tmp >>= 4) & 0xF;
+        hist_raw.mintemp = (tmp >>= 4) & 0xF;
+        hist_raw.maxchgcurr = (tmp >>= 4) & 0xF;
+        hist_raw.maxdischgcurr = (tmp >>= 4) & 0xF;
+
+        /* Mapping to original format to collect data */
+        /* go/pixel-battery-eeprom-atom#heading=h.dcawdjiz2ls6 */
+        hist.tempco = hist_raw.tempco;
+        hist.rcomp0 = hist_raw.rcomp0;
+        hist.timer_h = (uint8_t)hist_raw.timer_h * 5;
+        hist.max_temp = (int8_t)hist_raw.maxtemp * 3 + 22;
+        hist.min_temp = (int8_t)hist_raw.mintemp * 3 - 20;
+        hist.min_ibatt = (int16_t)hist_raw.maxchgcurr * 500 * (-1);
+        hist.max_ibatt = (int16_t)hist_raw.maxdischgcurr * 500;
+        hist.min_vbatt = (uint16_t)hist_raw.minvolt * 10 + 2500;
+        hist.max_vbatt = (uint16_t)hist_raw.maxvolt * 20 + 4200;
+        hist.batt_soc = (uint8_t)hist_raw.vfsoc * 2;
+        hist.msoc = (uint8_t)hist_raw.mixsoc * 2;
+        hist.full_cap = (int16_t)hist_raw.fullcaprep * 125 / 1000;
+        hist.full_rep = (int16_t)hist_raw.fullcapnom * 125 / 1000;
+
+        /* i < sparse_index_count: 20 40 60 80  */
+        if (i < sparse_index_count)
+            hist.cycle_cnt = (i + 1) * 20;
+        else
+            hist.cycle_cnt = (i + sparse_index_count + 1) * 10;
+
+        reportEvent(stats_client, hist);
+        report_time_ = getTimeSecs();
     }
+    return;
 }
 
 int64_t BatteryEEPROMReporter::getTimeSecs(void) {
@@ -321,9 +294,7 @@ void BatteryEEPROMReporter::reportEvent(const std::shared_ptr<IStats> &stats_cli
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryEEPROM to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryEEPROMReporter::reportEventInt32(const std::shared_ptr<IStats> &stats_client,
@@ -367,9 +338,7 @@ void BatteryEEPROMReporter::reportEventInt32(const std::shared_ptr<IStats> &stat
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kBatteryEeprom,
                         .values = std::move(values)};
-    const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
-    if (!ret.isOk())
-        ALOGE("Unable to report BatteryEEPROM to Stats service");
+    reportVendorAtom(stats_client, event);
 }
 
 void BatteryEEPROMReporter::checkAndReportGMSR(const std::shared_ptr<IStats> &stats_client,
@@ -486,7 +455,7 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
                                     .checksum = EvtModelLoading, };
     std::string file_contents;
     std::string path;
-    int num, pos = 0;
+    int num;
     const char *data;
 
     if (paths.empty())
@@ -510,15 +479,12 @@ void BatteryEEPROMReporter::checkAndReportFGModelLoading(const std::shared_ptr<I
 
     data = file_contents.c_str();
 
-    num = sscanf(&data[pos],  "ModelNextUpdate: %" SCNu16 "\n"
-                 "%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%*x:%*x\n%n",
-                 &params.rslow, &pos);
-    if (num != 1) {
+    num = sscanf(data, "ModelNextUpdate: %" SCNu16 "%*[0-9a-f: \n]ATT: %" SCNu16 " FAIL: %" SCNu16,
+                 &params.rslow, &params.full_cap, &params.esr);
+    if (num != 3) {
         ALOGE("Couldn't process ModelLoading History. num=%d\n", num);
         return;
-    }
-
-    sscanf(&data[pos],  "ATT: %" SCNu16 " FAIL: %" SCNu16, &params.full_cap, &params.esr);
+     }
 
     /* don't need to report when attempts counter is zero */
     if (params.full_cap == 0)
