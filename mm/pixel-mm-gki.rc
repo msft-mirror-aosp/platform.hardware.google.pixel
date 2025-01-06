@@ -29,8 +29,6 @@ on property:sys.boot_completed=1 && property:persist.vendor.boot.zram.size=*
 
 on property:sys.boot_completed=1
     swapon_all /vendor/etc/fstab.zram.${vendor.zram.size}
-
-on property:sys.boot_completed=1
     chmod 444 /sys/kernel/debug/page_owner
     # Allow max_usage_kb to be reset by system processes
     chown system system /sys/kernel/vendor_mm/gcma_heap/trusty:faceauth_rawimage_heap/max_usage_kb
