@@ -253,6 +253,8 @@ struct CdevInfo {
     std::string write_path;
     std::vector<float> state2power;
     int max_state;
+    bool apply_powercap;
+    float multiplier;
 };
 
 struct PowerRailInfo {

@@ -24,6 +24,7 @@
 #include <android-base/strings.h>
 #include <utils/Trace.h>
 
+#include <filesystem>
 #include <iterator>
 #include <set>
 #include <sstream>
@@ -48,6 +49,10 @@ constexpr std::string_view kUserSpaceSuffix("user_space");
 constexpr std::string_view kCoolingDeviceCurStateSuffix("cur_state");
 constexpr std::string_view kCoolingDeviceMaxStateSuffix("max_state");
 constexpr std::string_view kCoolingDeviceState2powerSuffix("state2power_table");
+constexpr std::string_view kPowerCapRoot("/sys/class/powercap");
+constexpr std::string_view kPowerCapNameFile("name");
+constexpr std::string_view kPowerCapState2powerSuffix("power_levels_uw");
+constexpr std::string_view kPowerCapCurBudgetSuffix("constraint_0_power_limit_uw");
 constexpr std::string_view kConfigProperty("vendor.thermal.config");
 constexpr std::string_view kConfigDefaultFileName("thermal_info_config.json");
 constexpr std::string_view kThermalGenlProperty("persist.vendor.enable.thermal.genl");
@@ -87,6 +92,28 @@ std::unordered_map<std::string, std::string> parseThermalPathMap(std::string_vie
                 ::android::base::StringPrintf("%s/%s", kThermalSensorsRoot.data(), dp->d_name));
     }
 
+    return path_map;
+}
+
+std::unordered_map<std::string, std::string> parsePowerCapPathMap(void) {
+    std::unordered_map<std::string, std::string> path_map;
+    std::error_code ec;
+
+    if (!std::filesystem::exists(kPowerCapRoot, ec)) {
+        LOG(INFO) << "powercap root " << kPowerCapRoot << " does not exist, ec " << ec.message();
+        return path_map;
+    }
+
+    for (const auto &entry : std::filesystem::directory_iterator(kPowerCapRoot)) {
+        std::string path = ::android::base::StringPrintf("%s/%s", entry.path().c_str(),
+                                                         kPowerCapNameFile.data());
+        std::string name;
+        if (::android::base::ReadFileToString(path, &name)) {
+            path_map.emplace(::android::base::Trim(name), entry.path());
+        } else {
+            PLOG(ERROR) << "Failed to read from " << path << ", errno " << errno;
+        }
+    }
     return path_map;
 }
 
@@ -167,6 +194,14 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
         ret = false;
     }
 
+    auto cdev_map = parseThermalPathMap(kCoolingDevicePrefix.data());
+    auto powercap_map = parsePowerCapPathMap();
+
+    if (!initializeThrottlingMap(cdev_map, powercap_map)) {
+        LOG(ERROR) << "Failed to initialize throttling map";
+        ret = false;
+    }
+
     if (!ParseSensorInfo(config, &sensor_info_map_)) {
         LOG(ERROR) << "Failed to parse sensor info config";
         ret = false;
@@ -175,12 +210,6 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
     auto tz_map = parseThermalPathMap(kSensorPrefix.data());
     if (!initializeSensorMap(tz_map)) {
         LOG(ERROR) << "Failed to initialize sensor map";
-        ret = false;
-    }
-
-    auto cdev_map = parseThermalPathMap(kCoolingDevicePrefix.data());
-    if (!initializeCoolingDevices(cdev_map)) {
-        LOG(ERROR) << "Failed to initialize cooling device map";
         ret = false;
     }
 
@@ -635,16 +664,26 @@ bool ThermalHelperImpl::readTemperatureThreshold(std::string_view sensor_name,
 }
 
 void ThermalHelperImpl::updateCoolingDevices(const std::vector<std::string> &updated_cdev) {
-    int max_state;
-
     for (const auto &target_cdev : updated_cdev) {
+        int max_state;
+        const auto &cdev_info = cooling_device_info_map_.at(target_cdev);
         if (thermal_throttling_.getCdevMaxRequest(target_cdev, &max_state)) {
-            if (cooling_devices_.writeCdevFile(target_cdev, std::to_string(max_state))) {
-                ATRACE_INT(target_cdev.c_str(), max_state);
-                LOG(INFO) << "Successfully update cdev " << target_cdev << " sysfs to "
-                          << max_state;
+            const auto request =
+                    cdev_info.apply_powercap
+                            ? static_cast<int>(std::lround(cdev_info.state2power[max_state] /
+                                                           cdev_info.multiplier))
+                            : max_state;
+            if (cooling_devices_.writeCdevFile(target_cdev, std::to_string(request))) {
+                ATRACE_INT(target_cdev.c_str(), request);
+                if (cdev_info.apply_powercap) {
+                    LOG(INFO) << "Successfully update cdev " << target_cdev << " budget to "
+                              << request << "(state:" << max_state << ")";
+                } else {
+                    LOG(INFO) << "Successfully update cdev " << target_cdev << " sysfs to "
+                              << request;
+                }
             } else {
-                LOG(ERROR) << "Failed to update cdev " << target_cdev << " sysfs to " << max_state;
+                LOG(ERROR) << "Failed to update cdev " << target_cdev << " sysfs to " << request;
             }
         }
     }
@@ -714,8 +753,10 @@ bool ThermalHelperImpl::isSubSensorValid(std::string_view sensor_data,
 
 void ThermalHelperImpl::clearAllThrottling(void) {
     // Clear the CDEV request
-    for (const auto &cdev_info_pair : cooling_device_info_map_) {
-        cooling_devices_.writeCdevFile(cdev_info_pair.first, "0");
+    for (const auto &[cdev_name, cdev_info] : cooling_device_info_map_) {
+        cooling_devices_.writeCdevFile(cdev_name, cdev_info.apply_powercap
+                                                          ? std::to_string(cdev_info.state2power[0])
+                                                          : "0");
     }
 
     for (auto &sensor_info_pair : sensor_info_map_) {
@@ -770,95 +811,156 @@ bool ThermalHelperImpl::initializeSensorMap(
     return true;
 }
 
-bool ThermalHelperImpl::initializeCoolingDevices(
-        const std::unordered_map<std::string, std::string> &path_map) {
-    for (auto &cooling_device_info_pair : cooling_device_info_map_) {
-        std::string cooling_device_name = cooling_device_info_pair.first;
-        if (!path_map.count(cooling_device_name)) {
-            LOG(ERROR) << "Could not find " << cooling_device_name << " in sysfs";
+bool ThermalHelperImpl::initializeCoolingDeviceEntry(
+        const std::unordered_map<std::string, std::string> &path_map, std::string_view name,
+        CdevInfo &cdev_info) {
+    if (!path_map.contains(name.data())) {
+        LOG(ERROR) << "Could not find " << name << " in CDEV sysfs";
+        return false;
+    }
+    // Add cooling device path for thermalHAL to get current state
+    std::string_view path = path_map.at(name.data());
+    std::string read_path;
+    if (!cdev_info.read_path.empty()) {
+        read_path = cdev_info.read_path.data();
+    } else {
+        read_path = ::android::base::StringPrintf("%s/%s", path.data(),
+                                                  kCoolingDeviceCurStateSuffix.data());
+    }
+    if (!cooling_devices_.addThermalFile(name, read_path)) {
+        LOG(ERROR) << "Could not add " << name << " read path to cooling device map";
+        return false;
+    }
+
+    // Get cooling device state2power table from sysfs if not defined in config
+    if (!cdev_info.state2power.size()) {
+        std::string state2power_path = ::android::base::StringPrintf(
+                "%s/%s", path.data(), kCoolingDeviceState2powerSuffix.data());
+        std::string state2power_str;
+        if (::android::base::ReadFileToString(state2power_path, &state2power_str)) {
+            LOG(INFO) << "Cooling device " << name << " use State2power read from sysfs";
+            std::stringstream power(state2power_str);
+            unsigned int power_number;
+            while (power >> power_number) {
+                cdev_info.state2power.push_back(static_cast<int>(power_number) *
+                                                cdev_info.multiplier);
+            }
+        }
+    }
+
+    // Check if there's any wrong ordered state2power value to avoid cdev stuck issue
+    for (size_t i = 0; i < cdev_info.state2power.size(); ++i) {
+        LOG(INFO) << "Cooling device " << name << " state:" << i
+                  << " power: " << cdev_info.state2power[i];
+        if (i > 0 && cdev_info.state2power[i] > cdev_info.state2power[i - 1]) {
+            LOG(ERROR) << "Higher power with higher state on cooling device " << name << "'s state"
+                       << i;
+        }
+    }
+
+    // Get max cooling device request state
+    std::string max_state;
+    std::string max_state_path = ::android::base::StringPrintf("%s/%s", path.data(),
+                                                               kCoolingDeviceMaxStateSuffix.data());
+    if (!::android::base::ReadFileToString(max_state_path, &max_state)) {
+        LOG(ERROR) << name << " could not open max state file:" << max_state_path;
+        cdev_info.max_state = std::numeric_limits<int>::max();
+    } else {
+        cdev_info.max_state = std::atoi(::android::base::Trim(max_state).c_str());
+        LOG(INFO) << "Cooling device " << name << " max state: " << cdev_info.max_state
+                  << " state2power number: " << cdev_info.state2power.size();
+        if (cdev_info.state2power.size() > 0 &&
+            static_cast<int>(cdev_info.state2power.size()) != (cdev_info.max_state + 1)) {
+            LOG(ERROR) << "Invalid state2power number: " << cdev_info.state2power.size()
+                       << ", number should be " << cdev_info.max_state + 1 << " (max_state + 1)";
+        }
+    }
+
+    // Add cooling device path for thermalHAL to request state
+    auto cdev_name = ::android::base::StringPrintf("%s_%s", name.data(), "w");
+    std::string write_path;
+    if (!cdev_info.write_path.empty()) {
+        write_path = cdev_info.write_path.data();
+    } else {
+        write_path = ::android::base::StringPrintf("%s/%s", path.data(),
+                                                   kCoolingDeviceCurStateSuffix.data());
+    }
+    if (!cooling_devices_.addThermalFile(cdev_name, write_path)) {
+        LOG(ERROR) << "Could not add " << name << " write path to cooling device map";
+        return false;
+    }
+    return true;
+}
+
+bool ThermalHelperImpl::initializePowercapEntry(
+        const std::unordered_map<std::string, std::string> &path_map, std::string_view name,
+        CdevInfo &cdev_info) {
+    if (!path_map.contains(name.data())) {
+        LOG(ERROR) << "Could not find " << name << " in powercap sysfs";
+        return false;
+    }
+    const auto &root_path = path_map.at(name.data());
+
+    // Add powercap path for thermalHAL to access the power budget via constraint_0_power_limit_uw
+    const auto powercap_path = ::android::base::StringPrintf("%s/%s", root_path.data(),
+                                                             kPowerCapCurBudgetSuffix.data());
+
+    if (!cooling_devices_.addThermalFile(name, powercap_path)) {
+        LOG(ERROR) << "Could not add " << name << " path to cooling device map";
+        return false;
+    }
+
+    const auto write_path_name = ::android::base::StringPrintf("%s_%s", name.data(), "w");
+    // Add powercap path for thermalHAL to request state
+    if (!cooling_devices_.addThermalFile(write_path_name, cdev_info.write_path.empty()
+                                                                  ? powercap_path
+                                                                  : cdev_info.write_path.data())) {
+        LOG(ERROR) << "Could not add " << name << " write path to cooling device map";
+        return false;
+    }
+
+    int power_number = 0;
+    // Get cooling device state2power table from sysfs if not defined in config
+    if (!cdev_info.state2power.size()) {
+        std::string state2power_path = ::android::base::StringPrintf(
+                "%s/%s", root_path.data(), kPowerCapState2powerSuffix.data());
+        std::string state2power_str;
+        if (::android::base::ReadFileToString(state2power_path, &state2power_str)) {
+            LOG(INFO) << "PowerCap " << name
+                      << " use State2power read from sysfs: " << state2power_str;
+            std::stringstream power(state2power_str);
+            while (power >> power_number) {
+                const auto power_mw = static_cast<int>(power_number * cdev_info.multiplier);
+                cdev_info.state2power.push_back(power_mw);
+            }
+        } else {
             return false;
         }
-        // Add cooling device path for thermalHAL to get current state
-        std::string_view path = path_map.at(cooling_device_name);
-        std::string read_path;
-        if (!cooling_device_info_pair.second.read_path.empty()) {
-            read_path = cooling_device_info_pair.second.read_path.data();
-        } else {
-            read_path = ::android::base::StringPrintf("%s/%s", path.data(),
-                                                      kCoolingDeviceCurStateSuffix.data());
-        }
-        if (!cooling_devices_.addThermalFile(cooling_device_name, read_path)) {
-            LOG(ERROR) << "Could not add " << cooling_device_name
-                       << " read path to cooling device map";
+    }
+
+    // Check if there's any wrong ordered state2power value to avoid cdev stuck issue
+    for (size_t i = 0; i < cdev_info.state2power.size(); ++i) {
+        LOG(INFO) << "PowerCap " << name << " state:" << i
+                  << " power: " << cdev_info.state2power[i];
+        if (i > 0 && cdev_info.state2power[i] > cdev_info.state2power[i - 1]) {
+            LOG(ERROR) << "Higher power with higher state on PowerCap " << name << "'s state" << i;
             return false;
         }
+    }
+    cdev_info.max_state = cdev_info.state2power.size() - 1;
 
-        // Get cooling device state2power table from sysfs if not defined in config
-        if (!cooling_device_info_pair.second.state2power.size()) {
-            std::string state2power_path = ::android::base::StringPrintf(
-                    "%s/%s", path.data(), kCoolingDeviceState2powerSuffix.data());
-            std::string state2power_str;
-            if (::android::base::ReadFileToString(state2power_path, &state2power_str)) {
-                LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
-                          << " use State2power read from sysfs";
-                std::stringstream power(state2power_str);
-                unsigned int power_number;
-                while (power >> power_number) {
-                    cooling_device_info_pair.second.state2power.push_back(
-                            static_cast<float>(power_number));
-                }
+    return true;
+}
+
+bool ThermalHelperImpl::initializeThrottlingMap(
+        const std::unordered_map<std::string, std::string> &cdev_map,
+        const std::unordered_map<std::string, std::string> &powercap_map) {
+    for (auto &[cdev_name, cdev_info] : cooling_device_info_map_) {
+        if (cdev_info.apply_powercap) {
+            if (!initializePowercapEntry(powercap_map, cdev_name, cdev_info)) {
+                return false;
             }
-        }
-
-        // Check if there's any wrong ordered state2power value to avoid cdev stuck issue
-        for (size_t i = 0; i < cooling_device_info_pair.second.state2power.size(); ++i) {
-            LOG(INFO) << "Cooling device " << cooling_device_info_pair.first << " state:" << i
-                      << " power: " << cooling_device_info_pair.second.state2power[i];
-            if (i > 0 && cooling_device_info_pair.second.state2power[i] >
-                                 cooling_device_info_pair.second.state2power[i - 1]) {
-                LOG(ERROR) << "Higher power with higher state on cooling device "
-                           << cooling_device_info_pair.first << "'s state" << i;
-            }
-        }
-
-        // Get max cooling device request state
-        std::string max_state;
-        std::string max_state_path = ::android::base::StringPrintf(
-                "%s/%s", path.data(), kCoolingDeviceMaxStateSuffix.data());
-        if (!::android::base::ReadFileToString(max_state_path, &max_state)) {
-            LOG(ERROR) << cooling_device_info_pair.first
-                       << " could not open max state file:" << max_state_path;
-            cooling_device_info_pair.second.max_state = std::numeric_limits<int>::max();
-        } else {
-            cooling_device_info_pair.second.max_state = std::stoi(::android::base::Trim(max_state));
-            LOG(INFO) << "Cooling device " << cooling_device_info_pair.first
-                      << " max state: " << cooling_device_info_pair.second.max_state
-                      << " state2power number: "
-                      << cooling_device_info_pair.second.state2power.size();
-            if (cooling_device_info_pair.second.state2power.size() > 0 &&
-                static_cast<int>(cooling_device_info_pair.second.state2power.size()) !=
-                        (cooling_device_info_pair.second.max_state + 1)) {
-                LOG(ERROR) << "Invalid state2power number: "
-                           << cooling_device_info_pair.second.state2power.size()
-                           << ", number should be " << cooling_device_info_pair.second.max_state + 1
-                           << " (max_state + 1)";
-            }
-        }
-
-        // Add cooling device path for thermalHAL to request state
-        cooling_device_name =
-                ::android::base::StringPrintf("%s_%s", cooling_device_name.c_str(), "w");
-        std::string write_path;
-        if (!cooling_device_info_pair.second.write_path.empty()) {
-            write_path = cooling_device_info_pair.second.write_path.data();
-        } else {
-            write_path = ::android::base::StringPrintf("%s/%s", path.data(),
-                                                       kCoolingDeviceCurStateSuffix.data());
-        }
-
-        if (!cooling_devices_.addThermalFile(cooling_device_name, write_path)) {
-            LOG(ERROR) << "Could not add " << cooling_device_name
-                       << " write path to cooling device map";
+        } else if (!initializeCoolingDeviceEntry(cdev_map, cdev_name, cdev_info)) {
             return false;
         }
     }

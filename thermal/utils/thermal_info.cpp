@@ -1566,6 +1566,8 @@ bool ParseCoolingDevice(const Json::Value &config,
     std::unordered_set<std::string> cooling_devices_name_parsed;
 
     for (Json::Value::ArrayIndex i = 0; i < cooling_devices.size(); ++i) {
+        bool apply_powercap = false;
+        float multiplier = 1.0;
         const std::string &name = cooling_devices[i]["Name"].asString();
         LOG(INFO) << "CoolingDevice[" << i << "]'s Name: " << name;
         if (name.empty()) {
@@ -1578,6 +1580,22 @@ bool ParseCoolingDevice(const Json::Value &config,
             LOG(INFO) << "CoolingDevice[" << name << "] is disabled. Skipping parsing";
             continue;
         }
+
+        if (cooling_devices[i]["PowerCap"].asBool() && cooling_devices[i]["PowerCap"].isBool()) {
+            LOG(INFO) << "CoolingDevice[" << name << "] apply powercap";
+            apply_powercap = true;
+        }
+
+        if (!cooling_devices[i]["Multiplier"].empty()) {
+            multiplier = cooling_devices[i]["Multiplier"].asFloat();
+            if (multiplier <= 0) {
+                cooling_devices_parsed->clear();
+                LOG(INFO) << "CoolingDevice[" << name << "]'s Multiplier: " << multiplier
+                          << " is invalid";
+                return false;
+            }
+        }
+        LOG(INFO) << "CoolingDevice[" << name << "]'s Multiplier: " << multiplier;
 
         auto result = cooling_devices_name_parsed.insert(name.data());
         if (!result.second) {
@@ -1616,14 +1634,13 @@ bool ParseCoolingDevice(const Json::Value &config,
                       << " does not support State2Power in thermal config";
         }
 
-        const std::string &power_rail = cooling_devices[i]["PowerRail"].asString();
-        LOG(INFO) << "Cooling device power rail : " << power_rail;
-
         (*cooling_devices_parsed)[name] = {
                 .type = cooling_device_type,
                 .read_path = read_path,
                 .write_path = write_path,
                 .state2power = state2power,
+                .apply_powercap = apply_powercap,
+                .multiplier = multiplier,
         };
         ++total_parsed;
     }
