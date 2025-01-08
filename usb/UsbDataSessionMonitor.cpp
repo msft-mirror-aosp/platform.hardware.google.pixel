@@ -21,6 +21,7 @@
 #include <aidl/android/frameworks/stats/IStats.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/strings.h>
 #include <android_hardware_usb_flags.h>
 #include <cutils/uevent.h>
 #include <pixelstats/StatsHelper.h>
@@ -36,6 +37,7 @@ namespace usb_flags = android::hardware::usb::flags;
 
 using aidl::android::frameworks::stats::IStats;
 using android::base::ReadFileToString;
+using android::base::Trim;
 using android::hardware::google::pixel::getStatsService;
 using android::hardware::google::pixel::reportUsbDataSessionEvent;
 using android::hardware::google::pixel::PixelAtoms::VendorUsbDataSessionEvent;
@@ -366,9 +368,11 @@ void UsbDataSessionMonitor::handleDataRoleEvent() {
 
     ALOGI("Update USB data role %s", role);
 
-    if (!std::strcmp(role, "host")) {
+    // Remove trailing spaces and newlines
+    std::string roleStr = Trim(role);
+    if (roleStr == "host") {
         newDataRole = PortDataRole::HOST;
-    } else if (!std::strcmp(role, "device")) {
+    } else if (roleStr == "device") {
         newDataRole = PortDataRole::DEVICE;
     } else {
         newDataRole = PortDataRole::NONE;
