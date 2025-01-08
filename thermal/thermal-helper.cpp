@@ -870,6 +870,28 @@ void ThermalHelperImpl::setMinTimeout(SensorInfo *sensor_info) {
     sensor_info->passive_delay = kMinPollIntervalMs;
 }
 
+bool ThermalHelperImpl::updateTripPointThreshold(std::string_view sensor_name,
+                                                 const bool is_trip_point_ignorable,
+                                                 std::string_view threshold,
+                                                 std::string_view trip_point_path) {
+    bool update_success = false;
+    if (::android::base::WriteStringToFile(threshold.data(), trip_point_path.data())) {
+        update_success = true;
+    } else {
+        if (FILE *fd = fopen(trip_point_path.data(), "r")) {
+            fclose(fd);
+        }
+        if (is_trip_point_ignorable) {
+            LOG(INFO) << "Skip the trip point threshold update at " << trip_point_path
+                      << " for ignorable sensor " << sensor_name << " , errno: " << errno;
+        } else {
+            LOG(ERROR) << "Failed to update sensor " << sensor_name << "'s trip threshold "
+                       << threshold << " at path " << trip_point_path << " , errno: " << errno;
+        }
+    }
+    return update_success | is_trip_point_ignorable;
+}
+
 void ThermalHelperImpl::initializeTrip(const std::unordered_map<std::string, std::string> &path_map,
                                        std::set<std::string> *monitored_sensors,
                                        bool thermal_genl_enabled) {
@@ -910,23 +932,17 @@ void ThermalHelperImpl::initializeTrip(const std::unordered_map<std::string, std
                             sensor_info.second.hot_thresholds[i] / sensor_info.second.multiplier));
                     path = ::android::base::StringPrintf("%s/%s", (tz_path.data()),
                                                          kSensorTripPointTempZeroFile.data());
-                    if (!::android::base::WriteStringToFile(threshold, path)) {
-                        LOG(ERROR) << "fail to update " << sensor_name << " trip point: " << path
-                                   << " to " << threshold;
-                        trip_update = false;
-                        break;
-                    }
+                    trip_update &= updateTripPointThreshold(
+                            sensor_name, sensor_info.second.is_trip_point_ignorable, threshold,
+                            path);
                     // Update trip_point_0_hyst threshold
                     threshold = std::to_string(std::lround(sensor_info.second.hot_hysteresis[i] /
                                                            sensor_info.second.multiplier));
                     path = ::android::base::StringPrintf("%s/%s", (tz_path.data()),
                                                          kSensorTripPointHystZeroFile.data());
-                    if (!::android::base::WriteStringToFile(threshold, path)) {
-                        LOG(ERROR) << "fail to update " << sensor_name << "trip hyst" << threshold
-                                   << path;
-                        trip_update = false;
-                        break;
-                    }
+                    trip_update &= updateTripPointThreshold(
+                            sensor_name, sensor_info.second.is_trip_point_ignorable, threshold,
+                            path);
                     break;
                 } else if (i == kThrottlingSeverityCount - 1) {
                     LOG(ERROR) << sensor_name << ":all thresholds are NAN";

@@ -1261,6 +1261,17 @@ bool ParseSensorInfo(const Json::Value &config,
         LOG(INFO) << "Sensor[" << name << "]'s SendPowerHint: " << std::boolalpha << send_powerhint
                   << std::noboolalpha;
 
+        bool is_trip_point_ignorable = false;
+        if (sensors[i]["TripPointIgnorable"].empty() ||
+            !sensors[i]["TripPointIgnorable"].isBool()) {
+            LOG(INFO) << "Failed to read Sensor[" << name
+                      << "]'s TripPointIgnorable, set to 'false'";
+        } else if (sensors[i]["TripPointIgnorable"].asBool()) {
+            is_trip_point_ignorable = true;
+        }
+        LOG(INFO) << "Sensor[" << name << "]'s TripPointIgnorable: " << std::boolalpha
+                  << is_trip_point_ignorable << std::noboolalpha;
+
         bool is_hidden = false;
         if (sensors[i]["Hidden"].empty() || !sensors[i]["Hidden"].isBool()) {
             LOG(INFO) << "Failed to read Sensor[" << name << "]'s Hidden, set to 'false'";
@@ -1535,6 +1546,7 @@ bool ParseSensorInfo(const Json::Value &config,
                 .send_powerhint = send_powerhint,
                 .is_watch = is_watch,
                 .is_hidden = is_hidden,
+                .is_trip_point_ignorable = is_trip_point_ignorable,
                 .log_level = log_level,
                 .virtual_sensor_info = std::move(virtual_sensor_info),
                 .throttling_info = std::move(throttling_info),
