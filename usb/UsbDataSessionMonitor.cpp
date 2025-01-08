@@ -454,7 +454,6 @@ void UsbDataSessionMonitor::handleUevent() {
             }
         }
 
-        // TODO: support bind@ unbind@ to detect dynamically allocated udc device
         if (std::regex_search(cp, std::regex(mDeviceState.ueventRegex))) {
             if (!strncmp(cp, "change@", strlen("change@"))) {
                 char *devname = cp + strlen("change@");
@@ -466,6 +465,10 @@ void UsbDataSessionMonitor::handleUevent() {
                  */
                 usleep(50000);
                 updateUdcBindStatus(devname);
+            } else if (!strncmp(cp, "add@", strlen("add@"))) {
+                addEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
+            } else if (!strncmp(cp, "remove@", strlen("remove@"))) {
+                removeEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
             }
         }
         /* advance to after the next \0 */
