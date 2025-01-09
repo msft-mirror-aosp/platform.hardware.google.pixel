@@ -345,9 +345,21 @@ void UsbDataSessionMonitor::setupNewSession() {
 
     if (mDataRole == PortDataRole::DEVICE) {
         clearDeviceStateEvents(&mDeviceState);
+        if (mDeviceState.delayEpoll) {
+            addEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
+            mDeviceState.delayEpoll = false;
+        }
     } else if (mDataRole == PortDataRole::HOST) {
         clearDeviceStateEvents(&mHost1State);
         clearDeviceStateEvents(&mHost2State);
+        if (mHost1State.delayEpoll) {
+            addEpollFile(mEpollFd.get(), mHost1State.filePath, mHost1State.fd);
+            mHost1State.delayEpoll = false;
+        }
+        if (mHost2State.delayEpoll) {
+            addEpollFile(mEpollFd.get(), mHost2State.filePath, mHost2State.fd);
+            mHost2State.delayEpoll = false;
+        }
     }
 
     if (mDataRole != PortDataRole::NONE) {
@@ -447,7 +459,12 @@ void UsbDataSessionMonitor::handleUevent() {
         for (auto e : {&mHost1State, &mHost2State}) {
             if (std::regex_search(cp, std::regex(e->ueventRegex))) {
                 if (!strncmp(cp, "bind@", strlen("bind@"))) {
-                    addEpollFile(mEpollFd.get(), e->filePath, e->fd);
+                    if (mDataRole == PortDataRole::HOST) {
+                        addEpollFile(mEpollFd.get(), e->filePath, e->fd);
+                    } else {
+                        e->delayEpoll = true;
+                        ALOGI("delay epoll to wait for data role host");
+                    }
                 } else if (!strncmp(cp, "unbind@", strlen("unbind@"))) {
                     removeEpollFile(mEpollFd.get(), e->filePath, e->fd);
                 }
@@ -459,7 +476,12 @@ void UsbDataSessionMonitor::handleUevent() {
                 char *devname = cp + strlen("change@");
                 updateUdcBindStatus(devname);
             } else if (!strncmp(cp, "add@", strlen("add@"))) {
-                addEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
+                if (mDataRole == PortDataRole::DEVICE) {
+                    addEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
+                } else {
+                    mDeviceState.delayEpoll = true;
+                    ALOGI("delay epoll to wait for data role device");
+                }
             } else if (!strncmp(cp, "remove@", strlen("remove@"))) {
                 removeEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
             }

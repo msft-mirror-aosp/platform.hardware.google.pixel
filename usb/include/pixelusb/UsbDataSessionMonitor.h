@@ -70,6 +70,7 @@ class UsbDataSessionMonitor {
         unique_fd fd;
         std::string filePath;
         std::string ueventRegex;
+        bool delayEpoll;
         // Usb device states reported by state sysfs
         std::vector<std::string> states;
         // Timestamps of when the usb device states were captured
