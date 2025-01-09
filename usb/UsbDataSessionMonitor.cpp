@@ -53,7 +53,8 @@ namespace usb {
 #define UEVENT_MSG_LEN 2048
 #define USB_STATE_MAX_LEN 20
 #define DATA_ROLE_MAX_LEN 10
-#define WARNING_SURFACE_DELAY_SEC 5
+// Extend delay to reduce false positives for missing data line warning (context: b/372885692)
+#define WARNING_SURFACE_DELAY_SEC 15
 #define ENUM_FAIL_DEFAULT_COUNT_THRESHOLD 3
 #define DEVICE_FLAKY_CONNECTION_CONFIGURED_COUNT_THRESHOLD 5
 
