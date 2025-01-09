@@ -40,7 +40,7 @@ using android::hardware::google::pixel::PixelAtoms::ChargeStats;
 using android::hardware::google::pixel::PixelAtoms::VoltageTierStats;
 
 #define DURATION_FILTER_SECS 15
-#define CHG_STATS_FMT "%d,%d,%d, %d,%d,%d,%d %d %d,%d"
+#define CHG_STATS_FMT "%d,%d,%d, %d,%d,%d,%d %d %d,%d, %d,%d"
 
 ChargeStatsReporter::ChargeStatsReporter() {}
 
@@ -71,9 +71,11 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
             ChargeStats::kReceiverState0FieldNumber,
             ChargeStats::kReceiverState1FieldNumber,
             ChargeStats::kAacrAlgoFieldNumber,
+            ChargeStats::kAacpVersionFieldNumber,
+            ChargeStats::kAaccFieldNumber,
     };
     const int32_t chg_fields_size = std::size(charge_stats_fields);
-    static_assert(chg_fields_size == 18, "Unexpected charge stats fields size");
+    static_assert(chg_fields_size == 20, "Unexpected charge stats fields size");
     const int32_t wlc_fields_size = 7;
     std::vector<VendorAtomValue> values(chg_fields_size);
     VendorAtomValue val;
@@ -84,12 +86,12 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
 
     ALOGD("processing %s", line.c_str());
 
-    stats_size = sscanf(line.c_str(), CHG_STATS_FMT, &tmp[0], &tmp[1], &tmp[2], &tmp[3],
-                        &tmp[4], &tmp[5], &tmp[6], &tmp[7], &tmp[8], &tmp[9]);
+    stats_size = sscanf(line.c_str(), CHG_STATS_FMT, &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4],
+                        &tmp[5], &tmp[6], &tmp[7], &tmp[8], &tmp[9], &tmp[18], &tmp[19]);
     if (stats_size != kNumChgStatsFormat00Fields && stats_size != kNumChgStatsFormat01Fields &&
-        stats_size != kNumChgStatsFormat02Fields) {
-            ALOGE("Couldn't process %s (stats_size: %d)", line.c_str(), stats_size);
-            return;
+        stats_size != kNumChgStatsFormat02Fields && stats_size != kNumChgStatsFormat03Fields) {
+        ALOGE("Couldn't process %s (stats_size: %d)", line.c_str(), stats_size);
+        return;
     }
 
     if (!wline_at.empty()) {
@@ -129,8 +131,8 @@ void ChargeStatsReporter::ReportChargeStats(const std::shared_ptr<IStats> &stats
     if (ReadFileToString(kGChargerMetricsPath.c_str(), &file_contents)) {
         ss.str(file_contents);
         while (std::getline(ss, pdo_line)) {
-            if (sscanf(pdo_line.c_str(), "D:%x,%x,%x,%x,%x,%x,%x", &pca_ac[0], &pca_ac[1], &pca_rs[0],
-                   &pca_rs[1], &pca_rs[2], &pca_rs[3], &pca_rs[4]) != 7) {
+            if (sscanf(pdo_line.c_str(), "D:%x,%x,%x,%x,%x,%x,%x", &pca_ac[0], &pca_ac[1],
+                       &pca_rs[0], &pca_rs[1], &pca_rs[2], &pca_rs[3], &pca_rs[4]) != 7) {
                 continue;
             } else {
                 ALOGD("processed %s, apdo:%d, pdo:%d", pdo_line.c_str(), pca_ac[1], pca_rs[4]);
