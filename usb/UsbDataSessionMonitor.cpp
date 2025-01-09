@@ -457,13 +457,6 @@ void UsbDataSessionMonitor::handleUevent() {
         if (std::regex_search(cp, std::regex(mDeviceState.ueventRegex))) {
             if (!strncmp(cp, "change@", strlen("change@"))) {
                 char *devname = cp + strlen("change@");
-                /*
-                 * Udc device emits a KOBJ_CHANGE event on configfs driver bind and unbind.
-                 * TODO: upstream udc driver emits KOBJ_CHANGE event BEFORE unbind is actually
-                 * executed. Add a short delay to get the correct state while working on a fix
-                 * upstream.
-                 */
-                usleep(50000);
                 updateUdcBindStatus(devname);
             } else if (!strncmp(cp, "add@", strlen("add@"))) {
                 addEpollFile(mEpollFd.get(), mDeviceState.filePath, mDeviceState.fd);
