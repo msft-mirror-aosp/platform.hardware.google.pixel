@@ -267,6 +267,15 @@ bool ParseThermalConfig(std::string_view config_path, Json::Value *config,
         MergeConfigEntries(config, &sub_config, "Sensors");
         MergeConfigEntries(config, &sub_config, "CoolingDevices");
         MergeConfigEntries(config, &sub_config, "PowerRails");
+
+        if (!sub_config["Stats"].empty()) {
+            if ((*config)["Stats"].empty()) {
+                (*config)["Stats"] = sub_config["Stats"];
+            } else {
+                MergeConfigEntries(&(*config)["Stats"]["Sensors"], &sub_config["Stats"]["Sensors"],
+                                   "RecordWithThreshold");
+            }
+        }
     }
 
     return true;
