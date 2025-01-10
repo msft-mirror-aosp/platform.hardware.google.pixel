@@ -195,7 +195,12 @@ class ThermalHelperImpl : public ThermalHelper {
 
   private:
     bool initializeSensorMap(const std::unordered_map<std::string, std::string> &path_map);
-    bool initializeCoolingDevices(const std::unordered_map<std::string, std::string> &path_map);
+    bool initializeThrottlingMap(const std::unordered_map<std::string, std::string> &cdev_map,
+                                 const std::unordered_map<std::string, std::string> &powercap_map);
+    bool initializePowercapEntry(const std::unordered_map<std::string, std::string> &powercap_map,
+                                 std::string_view name, CdevInfo &cdev_info);
+    bool initializeCoolingDeviceEntry(const std::unordered_map<std::string, std::string> &cdev_map,
+                                      std::string_view name, CdevInfo &cdev_info);
     bool isSubSensorValid(std::string_view sensor_data, const SensorFusionType sensor_fusion_type);
     bool updateTripPointThreshold(std::string_view sensor_name, const bool is_trip_point_ignorable,
                                   std::string_view threshold, std::string_view trip_point_path);
@@ -226,7 +231,7 @@ class ThermalHelperImpl : public ThermalHelper {
     float readPredictionAfterTimeMs(std::string_view sensor_name, const size_t time_ms);
     bool readTemperaturePredictions(std::string_view sensor_name, std::vector<float> *predictions);
     void updateCoolingDevices(const std::vector<std::string> &cooling_devices_to_update);
-    // Check the max CDEV state for cdev_ceiling
+    // Check the max throttling for binded cooling device
     void maxCoolingRequestCheck(
             std::unordered_map<std::string, BindedCdevInfo> *binded_cdev_info_map);
     void checkUpdateSensorForEmul(std::string_view target_sensor, const bool max_throttling);
