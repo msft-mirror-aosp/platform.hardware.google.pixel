@@ -64,7 +64,6 @@ void reportVendorAtom(const std::shared_ptr<IStats> &stats_client, VendorAtom ev
         ALOGE("Unable to report %d to Stats service", event.atomId);
         return;
     }
-    ALOGD("reportVendorAtom id %d to Stats service", event.atomId);
 }
 
 void reportSpeakerImpedance(const std::shared_ptr<IStats> &stats_client,
@@ -272,6 +271,7 @@ void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
             continue;
         }
 
+        std::fill(vect.begin(), vect.end(), 0);
         for (field_idx = 0; field_idx < num_fields; field_idx++, pos += read) {
             if (format == FormatAddrWithVal) {
                 num = sscanf(&line.c_str()[pos], "%x:%x%n", &addr, &val, &read);
@@ -285,7 +285,7 @@ void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
                     break;
                 vect[field_idx] = val;
             } else if (format == FormatOnlyVal) {
-                 num = sscanf(&line.c_str()[pos], "%x%n", &val, &read);
+                num = sscanf(&line.c_str()[pos], "%x%n", &val, &read);
                 if (num != 1)
                     break;
                 vect[field_idx] = val;
@@ -294,7 +294,7 @@ void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
             }
         }
 
-        if (field_idx == num_fields)
+        if (field_idx == num_fields || format == FormatOnlyVal)
             events.push_back(vect);
     }
     if (events.size() > 0 || reported > 0)
