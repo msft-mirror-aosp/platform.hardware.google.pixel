@@ -1108,7 +1108,6 @@ bool ThermalHelperImpl::fillTemperatureThresholds(
         } else {
             LOG(ERROR) << __func__ << ": error reading temperature threshold for sensor: "
                        << name_info_pair.first;
-            return false;
         }
     }
     *thresholds = ret;
@@ -1127,7 +1126,6 @@ bool ThermalHelperImpl::fillCurrentCoolingDevices(
             ret.emplace_back(std::move(value));
         } else {
             LOG(ERROR) << __func__ << ": error reading cooling device: " << name_info_pair.first;
-            return false;
         }
     }
     *cooling_devices = ret;
