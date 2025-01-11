@@ -143,6 +143,7 @@ message Atom {
       WaterEventReported water_event_reported = 105089;
       MediaPlaybackUsageStatsReported media_playback_usage_stats_reported = 105090 [(android.os.statsd.module) = "pixelaudio"];
       CallUsageStatsReported call_usage_stats_reported = 105091 [(android.os.statsd.module) = "pixelaudio"];
+      BatteryFirmwareUpdateReported battery_firmware_update_reported = 105092;
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -3285,3 +3286,30 @@ message WaterEventReported {
   /* Was system fault enabled */
   optional CircuitState fault_enabled = 12;
 }
+
+/**
+ * A message containing battery related firmware update stats
+ * Logged from:
+ *    hardware/google/pixel/pixelstats/BatteryFwUpdateReporter.cpp
+ */
+message BatteryFirmwareUpdateReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  optional int32 msg_type = 2;
+  optional int32 msg_category = 3;
+  /* current firmware version */
+  optional int32 major_version_from = 4;
+  optional int32 minor_version_from = 5;
+  /* target firmware version */
+  optional int32 major_version_to = 6;
+  optional int32 minor_version_to = 7;
+  optional int32 update_status = 8;
+  optional int32 attempts = 9;
+  optional int32 unix_time_sec = 10;
+  /* additional firmware data */
+  optional int32 fw_data0 = 11;
+  optional int32 fw_data1 = 12;
+  optional int32 fw_data2 = 13;
+  optional int32 fw_data3 = 14;
+}
+
