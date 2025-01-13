@@ -1437,10 +1437,19 @@ bool ParseSensorInfo(const Json::Value &config,
             LOG(INFO) << "Sensor[" << name << "]'s TempPath: " << temp_path;
         }
 
-        std::string severity_reference;
-        if (!sensors[i]["SeverityReference"].empty()) {
-            severity_reference = sensors[i]["SeverityReference"].asString();
-            LOG(INFO) << "Sensor[" << name << "]'s SeverityReference: " << temp_path;
+        std::vector<std::string> severity_reference;
+
+        values = sensors[i]["SeverityReference"];
+        if (values.isString()) {
+            severity_reference.emplace_back(values.asString());
+            LOG(INFO) << "Sensor[" << name << "]'s SeverityReference:" << values.asString();
+        } else if (values.size()) {
+            severity_reference.reserve(values.size());
+            for (Json::Value::ArrayIndex j = 0; j < values.size(); ++j) {
+                severity_reference.emplace_back(values[j].asString());
+                LOG(INFO) << "Sensor[" << name << "]'s SeverityReference[" << j
+                          << "]: " << severity_reference[j];
+            }
         }
 
         float vr_threshold = NAN;
