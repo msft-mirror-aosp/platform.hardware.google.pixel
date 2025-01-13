@@ -115,14 +115,14 @@ class UeventListener {
 
 
     const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventType>
-            kGpuEventTypeStrToEnum{
+            kMaliGpuEventTypeStrToEnum{
                     {"KMD_ERROR",
                      PixelAtoms::GpuEvent::GpuEventType::GpuEvent_GpuEventType_MALI_KMD_ERROR},
                     {"GPU_RESET",
                      PixelAtoms::GpuEvent::GpuEventType::GpuEvent_GpuEventType_MALI_GPU_RESET}};
 
     const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventInfo>
-            kGpuEventInfoStrToEnum{
+            kMaliGpuEventInfoStrToEnum{
                     {"CSG_REQ_STATUS_UPDATE",
                      PixelAtoms::GpuEvent::GpuEventInfo::
                              GpuEvent_GpuEventInfo_MALI_CSG_REQ_STATUS_UPDATE},
@@ -173,6 +173,20 @@ class UeventListener {
                     {"TRACE_BUF_INVALID_SLOT",
                      PixelAtoms::GpuEvent::GpuEventInfo::
                              GpuEvent_GpuEventInfo_MALI_TRACE_BUF_INVALID_SLOT}};
+
+    const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventType>
+            kPVRGpuEventTypeStrToEnum{
+                    {"KMD_ERROR",
+                     PixelAtoms::GpuEvent::GpuEventType::GpuEvent_GpuEventType_PVR_KMD_ERROR}};
+
+    const std::unordered_map<std::string, PixelAtoms::GpuEvent::GpuEventInfo>
+            kPVRGpuEventInfoStrToEnum{
+                    {"FW_PAGEFAULT", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                   GpuEvent_GpuEventInfo_PVR_FW_PAGEFAULT},
+                    {"HOST_WDG_FW_ERROR", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                    GpuEvent_GpuEventInfo_PVR_HOST_WDG_FW_ERROR},
+                    {"GUILTY_LOCKUP", PixelAtoms::GpuEvent::GpuEventInfo::
+                                                    GpuEvent_GpuEventInfo_PVR_GUILTY_LOCKUP}};
 
     const std::unordered_map<std::string,
                              PixelAtoms::ThermalSensorAbnormalityDetected::AbnormalityType>

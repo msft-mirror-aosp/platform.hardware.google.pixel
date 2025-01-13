@@ -1991,6 +1991,8 @@ message GpuEvent {
       MALI_TYPE_NONE = 0;
       MALI_KMD_ERROR = 1;
       MALI_GPU_RESET = 2;
+      /* Reserving up to 9 for mali event types */
+      PVR_KMD_ERROR = 10;
     }
     enum GpuEventInfo {
       MALI_INFO_NONE = 0;
@@ -2018,6 +2020,11 @@ message GpuEvent {
       MALI_GPU_PAGE_FAULT = 22;
       MALI_MMU_AS_ACTIVE_STUCK = 23;
       MALI_TRACE_BUF_INVALID_SLOT = 24;
+      /* Reserving up to 49 for mali event info */
+      PVR_INFO_NONE = 50;
+      PVR_FW_PAGEFAULT = 51;
+      PVR_HOST_WDG_FW_ERROR = 52;
+      PVR_GUILTY_LOCKUP = 53;
     }
 
     /* Vendor reverse domain name (expecting "com.google.pixel"). */
