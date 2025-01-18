@@ -230,8 +230,8 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
         }
     }
 
-    for (auto &name_status_pair : sensor_info_map_) {
-        sensor_status_map_[name_status_pair.first] = {
+    for (auto &[sensor_name, sensor_info] : sensor_info_map_) {
+        sensor_status_map_[sensor_name] = {
                 .severity = ThrottlingSeverity::NONE,
                 .prev_hot_severity = ThrottlingSeverity::NONE,
                 .prev_cold_severity = ThrottlingSeverity::NONE,
@@ -241,34 +241,31 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
                 .override_status = {nullptr, false, false},
         };
 
-        if (name_status_pair.second.throttling_info != nullptr) {
+        if (sensor_info.throttling_info != nullptr) {
             if (!thermal_throttling_.registerThermalThrottling(
-                        name_status_pair.first, name_status_pair.second.throttling_info,
-                        cooling_device_info_map_)) {
-                LOG(ERROR) << name_status_pair.first << " failed to register thermal throttling";
+                        sensor_name, sensor_info.throttling_info, cooling_device_info_map_)) {
+                LOG(ERROR) << sensor_name << " failed to register thermal throttling";
                 ret = false;
                 break;
             }
 
             // Update cooling device max state for default mode
-            maxCoolingRequestCheck(&name_status_pair.second.throttling_info->binded_cdev_info_map);
+            maxCoolingRequestCheck(&sensor_info.throttling_info->binded_cdev_info_map);
 
             // Update cooling device max state for each profile mode
-            for (auto &cdev_throttling_profile_pair :
-                 name_status_pair.second.throttling_info->profile_map) {
-                maxCoolingRequestCheck(&cdev_throttling_profile_pair.second);
+            for (auto &[cdev_name, cdev_throttling_info] :
+                 sensor_info.throttling_info->profile_map) {
+                maxCoolingRequestCheck(&cdev_throttling_info);
             }
         }
         // Check the virtual sensor settings are valid
-        if (name_status_pair.second.virtual_sensor_info != nullptr) {
+        if (sensor_info.virtual_sensor_info != nullptr) {
             // Check if sub sensor setting is valid
-            for (size_t i = 0;
-                 i < name_status_pair.second.virtual_sensor_info->linked_sensors.size(); i++) {
-                if (!isSubSensorValid(
-                            name_status_pair.second.virtual_sensor_info->linked_sensors[i],
-                            name_status_pair.second.virtual_sensor_info->linked_sensors_type[i])) {
-                    LOG(ERROR) << name_status_pair.first << "'s link sensor "
-                               << name_status_pair.second.virtual_sensor_info->linked_sensors[i]
+            for (size_t i = 0; i < sensor_info.virtual_sensor_info->linked_sensors.size(); i++) {
+                if (!isSubSensorValid(sensor_info.virtual_sensor_info->linked_sensors[i],
+                                      sensor_info.virtual_sensor_info->linked_sensors_type[i])) {
+                    LOG(ERROR) << sensor_name << "'s link sensor "
+                               << sensor_info.virtual_sensor_info->linked_sensors[i]
                                << " is invalid";
                     ret = false;
                     break;
@@ -276,32 +273,28 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
             }
 
             // Check if the backup sensor is valid
-            if (!name_status_pair.second.virtual_sensor_info->backup_sensor.empty()) {
-                if (!isSubSensorValid(name_status_pair.second.virtual_sensor_info->backup_sensor,
+            if (!sensor_info.virtual_sensor_info->backup_sensor.empty()) {
+                if (!isSubSensorValid(sensor_info.virtual_sensor_info->backup_sensor,
                                       SensorFusionType::SENSOR)) {
-                    LOG(ERROR) << name_status_pair.first << "'s backup sensor "
-                               << name_status_pair.second.virtual_sensor_info->backup_sensor
-                               << " is invalid";
+                    LOG(ERROR) << sensor_name << "'s backup sensor "
+                               << sensor_info.virtual_sensor_info->backup_sensor << " is invalid";
                     ret = false;
                     break;
                 }
             }
 
             // Check if the trigger sensor is valid
-            if (!name_status_pair.second.virtual_sensor_info->trigger_sensors.empty() &&
-                name_status_pair.second.is_watch) {
-                for (size_t i = 0;
-                     i < name_status_pair.second.virtual_sensor_info->trigger_sensors.size(); i++) {
+            if (!sensor_info.virtual_sensor_info->trigger_sensors.empty() && sensor_info.is_watch) {
+                for (size_t i = 0; i < sensor_info.virtual_sensor_info->trigger_sensors.size();
+                     i++) {
                     if (sensor_info_map_.count(
-                                name_status_pair.second.virtual_sensor_info->trigger_sensors[i])) {
-                        sensor_info_map_[name_status_pair.second.virtual_sensor_info
-                                                 ->trigger_sensors[i]]
+                                sensor_info.virtual_sensor_info->trigger_sensors[i])) {
+                        sensor_info_map_[sensor_info.virtual_sensor_info->trigger_sensors[i]]
                                 .is_watch = true;
                     } else {
-                        LOG(ERROR)
-                                << name_status_pair.first << "'s trigger sensor: "
-                                << name_status_pair.second.virtual_sensor_info->trigger_sensors[i]
-                                << " is invalid";
+                        LOG(ERROR) << sensor_name << "'s trigger sensor: "
+                                   << sensor_info.virtual_sensor_info->trigger_sensors[i]
+                                   << " is invalid";
                         ret = false;
                         break;
                     }
@@ -309,25 +302,26 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
             }
 
             // Check if the severity reference sensor is valid
-            if (name_status_pair.second.severity_reference != "") {
-                if (sensor_info_map_.contains(name_status_pair.second.severity_reference)) {
-                    sensor_info_map_[name_status_pair.second.severity_reference].is_watch = true;
-                    LOG(INFO) << "Enable is_watch for " << name_status_pair.first
-                              << "'s severity reference sensor: "
-                              << name_status_pair.second.severity_reference;
-                } else {
-                    LOG(ERROR) << name_status_pair.first << "'s severity reference sensor: "
-                               << name_status_pair.second.severity_reference << " is invalid";
-                    ret = false;
+            if (!sensor_info.severity_reference.empty()) {
+                for (size_t i = 0; i < sensor_info.severity_reference.size(); i++) {
+                    if (!sensor_info_map_.contains(sensor_info.severity_reference[i])) {
+                        LOG(ERROR) << sensor_name
+                                   << "'s severity_reference: " << sensor_info.severity_reference[i]
+                                   << " is invalid";
+                        ret = false;
+                        break;
+                    } else {
+                        sensor_info_map_[sensor_info.severity_reference[i]].is_watch = true;
+                    }
                 }
             }
         }
         // Check predictor info config
-        if ((name_status_pair.second.predictor_info != nullptr) &&
-            name_status_pair.second.predictor_info->support_pid_compensation) {
-            std::string predict_sensor_name = name_status_pair.second.predictor_info->sensor;
+        if ((sensor_info.predictor_info != nullptr) &&
+            sensor_info.predictor_info->support_pid_compensation) {
+            std::string predict_sensor_name = sensor_info.predictor_info->sensor;
             if (!(sensor_info_map_.count(predict_sensor_name))) {
-                LOG(ERROR) << name_status_pair.first << "'s predictor " << predict_sensor_name
+                LOG(ERROR) << sensor_name << "'s predictor " << predict_sensor_name
                            << " is not part of sensor_info_map_";
                 ret = false;
                 break;
@@ -336,31 +330,29 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
             const auto &predictor_sensor_info = sensor_info_map_.at(predict_sensor_name);
             if (predictor_sensor_info.virtual_sensor_info == nullptr ||
                 predictor_sensor_info.virtual_sensor_info->vt_estimator == nullptr) {
-                LOG(ERROR) << name_status_pair.first << "'s predictor " << predict_sensor_name
+                LOG(ERROR) << sensor_name << "'s predictor " << predict_sensor_name
                            << " does not support prediction";
                 ret = false;
                 break;
             }
 
             std::vector<float> output_template;
-            size_t prediction_weight_count =
-                    name_status_pair.second.predictor_info->prediction_weights.size();
+            size_t prediction_weight_count = sensor_info.predictor_info->prediction_weights.size();
             // read predictor out to get the size of output vector
             ::thermal::vtestimator::VtEstimatorStatus predict_check =
                     predictor_sensor_info.virtual_sensor_info->vt_estimator->GetAllPredictions(
                             &output_template);
 
             if (predict_check != ::thermal::vtestimator::kVtEstimatorOk) {
-                LOG(ERROR) << "Failed to get output size of " << name_status_pair.first
-                           << "'s predictor " << predict_sensor_name
-                           << " GetAllPredictions ret: " << ret << ")";
+                LOG(ERROR) << "Failed to get output size of " << sensor_name << "'s predictor "
+                           << predict_sensor_name << " GetAllPredictions ret: " << ret << ")";
                 ret = false;
                 break;
             }
 
             if (prediction_weight_count != output_template.size()) {
-                LOG(ERROR) << "Sensor [" << name_status_pair.first
-                           << "]: " << "prediction weights size (" << prediction_weight_count
+                LOG(ERROR) << "Sensor [" << sensor_name << "]: "
+                           << "prediction weights size (" << prediction_weight_count
                            << ") doesn't match predictor [" << predict_sensor_name
                            << "]'s output size (" << output_template.size() << ")";
                 ret = false;
@@ -1133,22 +1125,24 @@ bool ThermalHelperImpl::fillCurrentCoolingDevices(
 }
 
 ThrottlingSeverity ThermalHelperImpl::getSeverityReference(std::string_view sensor_name) {
+    ThrottlingSeverity target_ref_severity = ThrottlingSeverity::NONE;
     if (!sensor_info_map_.contains(sensor_name.data())) {
-        return ThrottlingSeverity::NONE;
+        return target_ref_severity;
     }
-    const std::string &severity_reference =
-            sensor_info_map_.at(sensor_name.data()).severity_reference;
-    if (severity_reference == "") {
-        return ThrottlingSeverity::NONE;
+    const auto &severity_ref_sensors = sensor_info_map_.at(sensor_name.data()).severity_reference;
+
+    for (size_t i = 0; i < severity_ref_sensors.size(); i++) {
+        Temperature temp;
+        if (readTemperature(severity_ref_sensors[i], &temp, false) != SensorReadStatus::OKAY) {
+            return ThrottlingSeverity::NONE;
+        }
+        LOG(VERBOSE) << sensor_name << "'s severity reference " << severity_ref_sensors[i]
+                     << " reading:" << toString(temp.throttlingStatus);
+
+        target_ref_severity = std::max(target_ref_severity, temp.throttlingStatus);
     }
 
-    Temperature temp;
-    if (readTemperature(severity_reference, &temp, false) != SensorReadStatus::OKAY) {
-        return ThrottlingSeverity::NONE;
-    }
-    LOG(VERBOSE) << sensor_name << "'s severity reference " << severity_reference
-                 << " reading:" << toString(temp.throttlingStatus);
-    return temp.throttlingStatus;
+    return target_ref_severity;
 }
 
 bool ThermalHelperImpl::readDataByType(std::string_view sensor_data, float *reading_value,
