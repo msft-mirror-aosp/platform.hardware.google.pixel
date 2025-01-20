@@ -746,9 +746,11 @@ bool ThermalHelperImpl::isSubSensorValid(std::string_view sensor_data,
 void ThermalHelperImpl::clearAllThrottling(void) {
     // Clear the CDEV request
     for (const auto &[cdev_name, cdev_info] : cooling_device_info_map_) {
-        cooling_devices_.writeCdevFile(cdev_name, cdev_info.apply_powercap
-                                                          ? std::to_string(cdev_info.state2power[0])
-                                                          : "0");
+        cooling_devices_.writeCdevFile(
+                cdev_name, cdev_info.apply_powercap
+                                   ? std::to_string(static_cast<int>(std::lround(
+                                             cdev_info.state2power[0] / cdev_info.multiplier)))
+                                   : "0");
     }
 
     for (auto &sensor_info_pair : sensor_info_map_) {
