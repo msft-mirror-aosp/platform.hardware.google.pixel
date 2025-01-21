@@ -303,6 +303,13 @@ void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
     return;
 }
 
+void setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset, int content) {
+    std::vector<VendorAtomValue> &val = *values;
+
+    if (offset - kVendorAtomOffset < val.size())
+        val[offset - kVendorAtomOffset].set<VendorAtomValue::intValue>(content);
+}
+
 }  // namespace pixel
 }  // namespace google
 }  // namespace hardware

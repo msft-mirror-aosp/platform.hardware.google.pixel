@@ -45,13 +45,6 @@ int64_t BatteryFGReporter::getTimeSecs() {
     return nanoseconds_to_seconds(systemTime(SYSTEM_TIME_BOOTTIME));
 }
 
-void BatteryFGReporter::setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset,
-                                          int content) {
-    std::vector<VendorAtomValue> &val = *values;
-    if (offset - kVendorAtomOffset < val.size())
-        val[offset - kVendorAtomOffset].set<VendorAtomValue::intValue>(content);
-}
-
 void BatteryFGReporter::reportFGEvent(const std::shared_ptr<IStats> &stats_client,
                                       struct BatteryFGPipeline &data) {
     // Load values array

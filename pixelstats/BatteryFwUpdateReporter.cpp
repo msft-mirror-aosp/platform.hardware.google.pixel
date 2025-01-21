@@ -40,14 +40,6 @@ using android::hardware::google::pixel::PixelAtoms::BatteryFirmwareUpdateReporte
 
 BatteryFwUpdateReporter::BatteryFwUpdateReporter() {}
 
-void BatteryFwUpdateReporter::setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset,
-                                                int content) {
-    std::vector<VendorAtomValue> &val = *values;
-
-    if (offset - kVendorAtomOffset < val.size())
-        val[offset - kVendorAtomOffset].set<VendorAtomValue::intValue>(content);
-}
-
 void BatteryFwUpdateReporter::reportEvent(const std::shared_ptr<IStats> &stats_client,
                                           struct BatteryFwUpdatePipeline &data) {
     std::vector<VendorAtomValue> values(kNumFwUpdatePipelineFields);
