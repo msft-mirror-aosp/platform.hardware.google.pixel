@@ -3277,22 +3277,22 @@ message WaterEventReported {
   /* The state of the reference sensor. */
   optional SensorState reference_state = 4;
   /* The threshold of the reference in mV. */
-  optional int32 reference_threshold_mv = 8;
+  optional int32 reference_threshold_mv = 8 [deprecated = true];
 
   /* The state of sensor 0. */
   optional SensorState sensor0_state = 5;
   /* The threshold of sensor 0 in mV. */
-  repeated int32 sensor0_threshold_mv = 9 [packed = true];
+  repeated int32 sensor0_threshold_mv = 9 [packed = true, deprecated = true];
 
   /* The state of sensor 1. */
   optional SensorState sensor1_state = 6;
   /* The threshold of sensor1 in mv. */
-  repeated int32 sensor1_threshold_mv = 10 [packed = true];
+  repeated int32 sensor1_threshold_mv = 10 [packed = true, deprecated = true];
 
   /* The state of sensor 2. */
   optional SensorState sensor2_state = 7;
   /* The threshold of the sensor 2 in mv. */
-  repeated int32 sensor2_threshold_mv = 11 [packed = true];
+  repeated int32 sensor2_threshold_mv = 11 [packed = true, deprecated = true];
 
   /* Was system fault enabled */
   optional CircuitState fault_enabled = 12;

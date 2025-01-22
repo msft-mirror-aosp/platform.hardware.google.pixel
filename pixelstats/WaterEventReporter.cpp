@@ -78,7 +78,7 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
         return;
     }
 
-    std::vector<VendorAtomValue> values(kNumOfWaterEventAtoms, 0);
+    std::vector<VendorAtomValue> values(kNumOfWaterEventAtomFields, 0);
 
     // Is this during boot or as a result of an event
     values[PixelAtoms::WaterEventReported::kCollectionEventFieldNumber - kVendorAtomOffset] = event_point;
@@ -112,22 +112,18 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
                 fault_enable ? PixelAtoms::WaterEventReported::CircuitState::WaterEventReported_CircuitState_CIRCUIT_ENABLED :
                               PixelAtoms::WaterEventReported::CircuitState::WaterEventReported_CircuitState_CIRCUIT_DISABLED;
 
-    std::tuple<std::string, int, int> sensors[] = {
-            {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber,
-             PixelAtoms::WaterEventReported::kReferenceThresholdMvFieldNumber},
-            {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber,
-             PixelAtoms::WaterEventReported::kSensor0ThresholdMvFieldNumber},
-            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber,
-             PixelAtoms::WaterEventReported::kSensor1ThresholdMvFieldNumber},
-            {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber,
-             PixelAtoms::WaterEventReported::kSensor1ThresholdMvFieldNumber}};
+    const std::tuple<std::string, int> sensors[] = {
+            {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber},
+            {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber},
+            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber},
+            {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber}
+    };
 
     //   Get the sensor states (including reference) from either the boot_value (if this is during
     //   startup), or the latched_value if this is the result of a uevent
-    for (auto e : sensors) {
-        std::string sensor_path = std::get<0>(e);
+    for (const auto& e : sensors) {
+        const std::string &sensor_path = std::get<0>(e);
         int sensor_state_field_number = std::get<1>(e);
-        int threshold_field_number = std::get<2>(e);
 
         std::string sensor_state_path = sysfs_path + "/" + sensor_path;
         sensor_state_path += (event_point == PixelAtoms::WaterEventReported::EventPoint::WaterEventReported_EventPoint_BOOT) ? "/boot_value" : "/latched_value";
@@ -153,14 +149,6 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
                 values[sensor_state_field_number - kVendorAtomOffset] =
                     PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_SENSOR_STATE_UNKNOWN;
             continue;
-        }
-
-        // report the threshold
-        std::string threshold_path = sysfs_path + "/" + sensor_path + "/threshold";
-        int sensor_threshold;
-        if (readFileToInt(threshold_path, &sensor_threshold)) {
-            values[PixelAtoms::WaterEventReported::kReferenceThresholdMvFieldNumber -
-                   kVendorAtomOffset] = sensor_threshold;
         }
     }
 
