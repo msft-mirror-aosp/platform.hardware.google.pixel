@@ -74,6 +74,8 @@ void BatteryFwUpdateReporter::reportEvent(const std::shared_ptr<IStats> &stats_c
     setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kUpdateStatusFieldNumber,
                       data.update_status);
     setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kAttemptsFieldNumber, data.attempts);
+    setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kUnixTimeSecFieldNumber,
+                      data.unix_time_sec);
     setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kFwData0FieldNumber, data.fw_data0);
     setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kFwData1FieldNumber, data.fw_data1);
     setAtomFieldValue(&values, BatteryFirmwareUpdateReported::kFwData2FieldNumber, data.fw_data2);
