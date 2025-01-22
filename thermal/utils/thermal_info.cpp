@@ -708,10 +708,17 @@ bool ParseBindedCdevInfo(
         const Json::Value &values,
         std::unordered_map<std::string, BindedCdevInfo> *binded_cdev_info_map,
         const bool support_pid, bool *support_hard_limit,
-        const std::unordered_map<std::string, std::vector<int>> &scaling_frequency_map) {
+        const std::unordered_map<std::string, std::vector<int>> &scaling_frequency_map,
+        const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map_) {
     for (Json::Value::ArrayIndex j = 0; j < values.size(); ++j) {
         Json::Value sub_values;
         const std::string &cdev_name = values[j]["CdevRequest"].asString();
+
+        if (cooling_device_info_map_.find(cdev_name) == cooling_device_info_map_.end()) {
+            LOG(ERROR) << "Binded cdev " << cdev_name << " is not defined in cooling devices";
+            return false;
+        }
+
         ThrottlingArray cdev_weight_for_pid;
         cdev_weight_for_pid.fill(NAN);
         CdevArray cdev_ceiling;
@@ -943,7 +950,8 @@ bool ParseBindedCdevInfo(
 bool ParseSensorThrottlingInfo(
         const std::string_view name, const Json::Value &sensor, bool *support_throttling,
         std::shared_ptr<ThrottlingInfo> *throttling_info,
-        const std::unordered_map<std::string, std::vector<int>> &scaling_frequency_map) {
+        const std::unordered_map<std::string, std::vector<int>> &scaling_frequency_map,
+        const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map_) {
     std::array<float, kThrottlingSeverityCount> k_po;
     k_po.fill(0.0);
     std::array<float, kThrottlingSeverityCount> k_pu;
@@ -1098,7 +1106,8 @@ bool ParseSensorThrottlingInfo(
     // Parse binded cooling device
     std::unordered_map<std::string, BindedCdevInfo> binded_cdev_info_map;
     if (!ParseBindedCdevInfo(sensor["BindedCdevInfo"], &binded_cdev_info_map, support_pid,
-                             &support_hard_limit, scaling_frequency_map)) {
+                             &support_hard_limit, scaling_frequency_map,
+                             cooling_device_info_map_)) {
         LOG(ERROR) << "Sensor[" << name << "]: failed to parse BindedCdevInfo";
         return false;
     }
@@ -1111,7 +1120,8 @@ bool ParseSensorThrottlingInfo(
         const std::string &mode = values[j]["Mode"].asString();
         std::unordered_map<std::string, BindedCdevInfo> binded_cdev_info_map_profile;
         if (!ParseBindedCdevInfo(values[j]["BindedCdevInfo"], &binded_cdev_info_map_profile,
-                                 support_pid, &support_hard_limit, scaling_frequency_map)) {
+                                 support_pid, &support_hard_limit, scaling_frequency_map,
+                                 cooling_device_info_map_)) {
             LOG(ERROR) << "Sensor[" << name << " failed to parse BindedCdevInfo profile";
         }
         // Check if the binded_cdev_info_map_profile is valid
@@ -1172,7 +1182,8 @@ bool ParseSensorThrottlingInfo(
 }
 
 bool ParseSensorInfo(const Json::Value &config,
-                     std::unordered_map<std::string, SensorInfo> *sensors_parsed) {
+                     std::unordered_map<std::string, SensorInfo> *sensors_parsed,
+                     const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map_) {
     Json::Value sensors = config["Sensors"];
     Json::Value cdevs = config["CoolingDevices"];
     std::unordered_map<std::string, std::vector<int>> scaling_frequency_map;
@@ -1537,7 +1548,7 @@ bool ParseSensorInfo(const Json::Value &config,
         bool support_throttling = false;  // support pid or hard limit
         std::shared_ptr<ThrottlingInfo> throttling_info;
         if (!ParseSensorThrottlingInfo(name, sensors[i], &support_throttling, &throttling_info,
-                                       scaling_frequency_map)) {
+                                       scaling_frequency_map, cooling_device_info_map_)) {
             LOG(ERROR) << "Sensor[" << name << "]: failed to parse throttling info";
             sensors_parsed->clear();
             return false;

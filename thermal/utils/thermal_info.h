@@ -268,7 +268,8 @@ bool ParseThermalConfig(std::string_view config_path, Json::Value *config,
                         std::unordered_set<std::string> *loaded_config_paths);
 void MergeConfigEntries(Json::Value *config, Json::Value *sub_config, std::string_view member_name);
 bool ParseSensorInfo(const Json::Value &config,
-                     std::unordered_map<std::string, SensorInfo> *sensors_parsed);
+                     std::unordered_map<std::string, SensorInfo> *sensors_parsed,
+                     const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map_);
 bool ParseCoolingDevice(const Json::Value &config,
                         std::unordered_map<std::string, CdevInfo> *cooling_device_parsed);
 bool ParsePowerRailInfo(const Json::Value &config,
