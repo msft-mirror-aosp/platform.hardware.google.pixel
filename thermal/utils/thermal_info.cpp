@@ -49,7 +49,7 @@ bool getTypeFromString(std::string_view str, T *out) {
 
 float getFloatFromValue(const Json::Value &value) {
     if (value.isString()) {
-        return std::stof(value.asString());
+        return std::atof(value.asString().c_str());
     } else {
         return value.asFloat();
     }
