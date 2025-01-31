@@ -1531,6 +1531,7 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
     boot_clock::time_point now = boot_clock::now();
     auto min_sleep_ms = std::chrono::milliseconds::max();
     bool power_data_is_updated = false;
+    bool shutdown_severity_reached = false;
 
     for (const auto &[sensor, temp] : uevent_sensor_map) {
         if (!std::isnan(temp)) {
@@ -1666,6 +1667,9 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
         if (sensor_status.severity == ThrottlingSeverity::NONE) {
             thermal_throttling_.clearThrottlingData(name_status_pair.first);
         } else {
+            if (sensor_status.severity == ThrottlingSeverity::SHUTDOWN) {
+                shutdown_severity_reached = true;
+            }
             // prepare for predictions for throttling compensation
             std::vector<float> sensor_predictions;
             if (sensor_info.predictor_info != nullptr &&
@@ -1718,7 +1722,7 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
 
     const auto since_last_power_log_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - power_files_.GetPrevPowerLogTime());
-    if (since_last_power_log_ms >= kPowerLogIntervalMs) {
+    if ((since_last_power_log_ms >= kPowerLogIntervalMs) || (shutdown_severity_reached)) {
         power_files_.logPowerStatus(now);
     }
 
