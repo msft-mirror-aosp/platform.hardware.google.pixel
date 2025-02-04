@@ -202,9 +202,16 @@ void UeventListener::ReportFwUpdateEvent(const std::shared_ptr<IStats> &stats_cl
     if (!driver || strcmp(driver, "DRIVER=max77779-fg"))
         return;
 
-    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath);
+    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath, EvtFwUpdate);
 }
 
+void UeventListener::ReportWlcFwUpdateEvent(const std::shared_ptr<IStats> &stats_client,
+                                            const char *driver) {
+    if (!driver || strcmp(driver, "DRIVER=google_wlc"))
+        return;
+
+    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath, EvtWlcFwUpdate);
+}
 /**
  * Report raw battery capacity, system battery capacity and associated
  * battery capacity curves. This data is collected to verify the filter
@@ -509,6 +516,7 @@ bool UeventListener::ProcessUevent() {
         ReportFGMetricsEvent(stats_client, driver);
         ReportWaterEvent(stats_client, driver, devpath);
         ReportFwUpdateEvent(stats_client, driver);
+        ReportWlcFwUpdateEvent(stats_client, driver);
     }
 
     if (log_fd_ > 0) {

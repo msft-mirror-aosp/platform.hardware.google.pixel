@@ -26,7 +26,6 @@
 #include <android-base/parseint.h>
 #include <android-base/strings.h>
 #include <pixelstats/BatteryFwUpdateReporter.h>
-#include <pixelstats/StatsHelper.h>
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 
 namespace android {
@@ -88,7 +87,8 @@ void BatteryFwUpdateReporter::reportEvent(const std::shared_ptr<IStats> &stats_c
 }
 
 void BatteryFwUpdateReporter::checkAndReportFwUpdate(const std::shared_ptr<IStats> &stats_client,
-                                                     const std::vector<std::string> &paths) {
+                                                     const std::vector<std::string> &paths,
+                                                     const ReportEventType &event_type) {
     struct BatteryFwUpdatePipeline params;
     struct timespec boot_time;
 
@@ -108,7 +108,7 @@ void BatteryFwUpdateReporter::checkAndReportFwUpdate(const std::shared_ptr<IStat
         std::vector<std::vector<uint32_t>> events;
 
         clock_gettime(CLOCK_MONOTONIC, &boot_time);
-        readLogbuffer(paths[i], kNumFwUpdatePipelineFields, EvtFwUpdate, FormatOnlyVal,
+        readLogbuffer(paths[i], kNumFwUpdatePipelineFields, event_type, FormatOnlyVal,
                       last_check_[i], events);
         for (int event_idx = 0; event_idx < events.size(); event_idx++) {
             std::vector<uint32_t> &event = events[event_idx];
