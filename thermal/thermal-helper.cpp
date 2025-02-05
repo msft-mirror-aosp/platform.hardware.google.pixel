@@ -537,7 +537,7 @@ bool ThermalHelperImpl::readCoolingDevice(std::string_view cooling_device,
 
     out->type = type;
     out->name = cooling_device.data();
-    out->value = std::stoi(data);
+    out->value = std::atoi(data.c_str());
 
     return true;
 }
@@ -1422,7 +1422,7 @@ SensorReadStatus ThermalHelperImpl::readThermalSensor(
             LOG(ERROR) << "failed to read sensor: " << sensor_name;
             return SensorReadStatus::ERROR;
         }
-        *temp = std::stof(::android::base::Trim(file_reading));
+        *temp = std::atof(::android::base::Trim(file_reading).c_str());
     } else {
         const auto &linked_sensors_size = sensor_info.virtual_sensor_info->linked_sensors.size();
         std::vector<float> sensor_readings(linked_sensors_size, NAN);
