@@ -143,6 +143,8 @@ message Atom {
       WaterEventReported water_event_reported = 105089;
       MediaPlaybackUsageStatsReported media_playback_usage_stats_reported = 105090 [(android.os.statsd.module) = "pixelaudio"];
       CallUsageStatsReported call_usage_stats_reported = 105091 [(android.os.statsd.module) = "pixelaudio"];
+      BatteryFirmwareUpdateReported battery_firmware_update_reported = 105092;
+      QualcommBatteryGauge qualcomm_battery_gauge = 105093 [(android.os.statsd.module) = "qbg"];
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -3284,4 +3286,49 @@ message WaterEventReported {
 
   /* Was system fault enabled */
   optional CircuitState fault_enabled = 12;
+}
+
+/**
+ * A message containing battery related firmware update stats
+ * Logged from:
+ *    hardware/google/pixel/pixelstats/BatteryFwUpdateReporter.cpp
+ */
+message BatteryFirmwareUpdateReported {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  optional int32 msg_type = 2;
+  optional int32 msg_category = 3;
+  /* current firmware version */
+  optional int32 major_version_from = 4;
+  optional int32 minor_version_from = 5;
+  /* target firmware version */
+  optional int32 major_version_to = 6;
+  optional int32 minor_version_to = 7;
+  optional int32 update_status = 8;
+  optional int32 attempts = 9;
+  optional int32 unix_time_sec = 10;
+  /* additional firmware data */
+  optional int32 fw_data0 = 11;
+  optional int32 fw_data1 = 12;
+  optional int32 fw_data2 = 13;
+  optional int32 fw_data3 = 14;
+}
+
+
+/*
+ * A message containing a list of 30 elements representing the battery history
+ * of milliwatts, and milliwatt durations which can be used to analyze battery
+ * behavior over time. The elements are ordered from oldest to newest.
+ * The history window is not measured in days but rather fluctuates between
+ * 100s of milliseconds and a few minutes based on the device's power state.
+ */
+message QualcommBatteryGauge {
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  /* The estimated milliwatts.*/
+  repeated int32 milliwatts = 2;
+  /* The estimated duration in milliseconds. */
+  repeated int32 duration_ms = 3;
+  /* The elapsed time in milliseconds, from when the final sample was taken. */
+  required int64 elapsed_time_ms = 4;
 }
