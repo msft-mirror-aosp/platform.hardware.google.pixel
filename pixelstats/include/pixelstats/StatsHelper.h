@@ -39,6 +39,7 @@ enum ReportEventType {
   EvtModelLoading = 0x4D4C,      /* ML */
   EvtFGRegularMonitor = 0x524D,  /* RM */
   EvtGMSR = 0xFFFF,              /* GMSR */
+  EvtWlcFwUpdate = 0x574C,       /* WL */
 };
 
 enum ReportEventFormat {

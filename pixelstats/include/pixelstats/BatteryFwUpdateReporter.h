@@ -21,6 +21,7 @@
 #include <string>
 
 #include <aidl/android/frameworks/stats/IStats.h>
+#include <pixelstats/StatsHelper.h>
 
 namespace android {
 namespace hardware {
@@ -35,7 +36,8 @@ class BatteryFwUpdateReporter {
     BatteryFwUpdateReporter();
 
     void checkAndReportFwUpdate(const std::shared_ptr<IStats> &stats_client,
-                                const std::vector<std::string> &paths);
+                                const std::vector<std::string> &paths,
+                                const ReportEventType &event_type);
 
   private:
     const int kVendorAtomOffset = 2;

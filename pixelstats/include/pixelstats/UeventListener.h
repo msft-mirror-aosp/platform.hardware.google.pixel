@@ -104,6 +104,7 @@ class UeventListener {
     void ReportWaterEvent(const std::shared_ptr<IStats> &stats_client,
                           const char *driver, const char *devpath);
     void ReportFwUpdateEvent(const std::shared_ptr<IStats> &stats_client, const char *driver);
+    void ReportWlcFwUpdateEvent(const std::shared_ptr<IStats> &stats_client, const char *driver);
 
     const std::string kAudioUevent;
     const std::string kBatterySSOCPath;
