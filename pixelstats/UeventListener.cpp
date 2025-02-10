@@ -47,12 +47,15 @@
 #include <hardware/google/pixel/pixelstats/pixelatoms.pb.h>
 #include <linux/thermal.h>
 #include <log/log.h>
+#include <pixelstats/JsonConfigUtils.h>
 #include <pixelstats/StatsHelper.h>
 #include <pixelstats/UeventListener.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <utils/StrongPointer.h>
+#include <fstream>
+#include <iostream>
 
 #include <string>
 #include <thread>
@@ -117,7 +120,14 @@ void UeventListener::ReportMicStatusUevents(const std::shared_ptr<IStats> &stats
                                             const char *devpath, const char *mic_status) {
     if (!devpath || !mic_status)
         return;
-    if (!strcmp(devpath, ("DEVPATH=" + kAudioUevent).c_str())) {
+
+    std::string audioUevent = getCStringOrDefault(configData, "AudioUevent");
+
+    if (audioUevent.empty()) {
+        ALOGV("audioUevent not specified in JSON");
+    }
+
+    if (!strcmp(devpath, ("DEVPATH=" + audioUevent).c_str())) {
         std::vector<std::string> value = android::base::Split(mic_status, "=");
         bool isbroken;
 
@@ -153,6 +163,13 @@ void UeventListener::ReportMicStatusUevents(const std::shared_ptr<IStats> &stats
 
 void UeventListener::ReportUsbPortOverheatEvent(const std::shared_ptr<IStats> &stats_client,
                                                 const char *driver) {
+
+    std::string usbPortOverheatPath = getCStringOrDefault(configData, "UsbPortOverheatPath");
+
+    if (usbPortOverheatPath.empty()) {
+        ALOGV("usbPortOverheatPath not specified in JSON");
+        usbPortOverheatPath = overheat_path_default;
+    }
     if (!driver || strcmp(driver, "DRIVER=google,overheat_mitigation")) {
         return;
     }
@@ -164,11 +181,11 @@ void UeventListener::ReportUsbPortOverheatEvent(const std::shared_ptr<IStats> &s
     int32_t time_to_inactive_secs = 0;
 
     // TODO(achant b/182941868): test return value and skip reporting in case of an error
-    ReadFileToInt((kUsbPortOverheatPath + "/plug_temp"), &plug_temperature_deci_c);
-    ReadFileToInt((kUsbPortOverheatPath + "/max_temp"), &max_temperature_deci_c);
-    ReadFileToInt((kUsbPortOverheatPath + "/trip_time"), &time_to_overheat_secs);
-    ReadFileToInt((kUsbPortOverheatPath + "/hysteresis_time"), &time_to_hysteresis_secs);
-    ReadFileToInt((kUsbPortOverheatPath + "/cleared_time"), &time_to_inactive_secs);
+    ReadFileToInt((usbPortOverheatPath + "/plug_temp"), &plug_temperature_deci_c);
+    ReadFileToInt((usbPortOverheatPath + "/max_temp"), &max_temperature_deci_c);
+    ReadFileToInt((usbPortOverheatPath + "/trip_time"), &time_to_overheat_secs);
+    ReadFileToInt((usbPortOverheatPath + "/hysteresis_time"), &time_to_hysteresis_secs);
+    ReadFileToInt((usbPortOverheatPath + "/cleared_time"), &time_to_inactive_secs);
 
     VendorUsbPortOverheat overheat_info;
     overheat_info.set_plug_temperature_deci_c(plug_temperature_deci_c);
@@ -182,11 +199,18 @@ void UeventListener::ReportUsbPortOverheatEvent(const std::shared_ptr<IStats> &s
 
 void UeventListener::ReportChargeMetricsEvent(const std::shared_ptr<IStats> &stats_client,
                                               const char *driver) {
+
+    std::string chargeMetricsPath = getCStringOrDefault(configData, "ChargeMetricsPath");
+
+    if (chargeMetricsPath.empty()) {
+        ALOGV("chargeMetricsPath not specified in JSON");
+        chargeMetricsPath = charge_metrics_path_default;
+    }
     if (!driver || strcmp(driver, "DRIVER=google,battery")) {
         return;
     }
 
-    charge_stats_reporter_.checkAndReport(stats_client, kChargeMetricsPath);
+    charge_stats_reporter_.checkAndReport(stats_client, chargeMetricsPath);
 }
 
 void UeventListener::ReportFGMetricsEvent(const std::shared_ptr<IStats> &stats_client,
@@ -194,7 +218,13 @@ void UeventListener::ReportFGMetricsEvent(const std::shared_ptr<IStats> &stats_c
     if (!driver || strcmp(driver, "DRIVER=max77779-fg"))
         return;
 
-    battery_fg_reporter_.checkAndReportFGAbnormality(stats_client, kFGAbnlPath);
+    std::vector<std::string> FGAbnlPath = {""};
+    if (configData.isMember("FGAbnlPath")) {
+        FGAbnlPath = readStringVectorFromJson(configData["FGAbnlPath"]);
+    } else {
+        ALOGV("FGAbnlPath not specified in JSON");
+    }
+    battery_fg_reporter_.checkAndReportFGAbnormality(stats_client, FGAbnlPath);
 }
 
 void UeventListener::ReportFwUpdateEvent(const std::shared_ptr<IStats> &stats_client,
@@ -202,15 +232,26 @@ void UeventListener::ReportFwUpdateEvent(const std::shared_ptr<IStats> &stats_cl
     if (!driver || strcmp(driver, "DRIVER=max77779-fg"))
         return;
 
-    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath, EvtFwUpdate);
+    std::vector<std::string> FwUpdatePath = {""};
+    if (configData.isMember("FwUpdatePath")) {
+        FwUpdatePath = readStringVectorFromJson(configData["FwUpdatePath"]);
+    } else {
+        ALOGV("FwUpdatePath not specified in JSON");
+    }
+    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, FwUpdatePath, EvtFwUpdate);
 }
-
 void UeventListener::ReportWlcFwUpdateEvent(const std::shared_ptr<IStats> &stats_client,
                                             const char *driver) {
     if (!driver || strcmp(driver, "DRIVER=google_wlc"))
         return;
 
-    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, kFwUpdatePath, EvtWlcFwUpdate);
+    std::vector<std::string> FwUpdatePath = {""};
+    if (configData.isMember("FwUpdatePath")) {
+        FwUpdatePath = readStringVectorFromJson(configData["FwUpdatePath"]);
+    } else {
+        ALOGV("FwUpdatePath not specified in JSON");
+    }
+    battery_fw_update_reporter_.checkAndReportFwUpdate(stats_client, FwUpdatePath, EvtWlcFwUpdate);
 }
 /**
  * Report raw battery capacity, system battery capacity and associated
@@ -235,38 +276,54 @@ void UeventListener::ReportBatteryCapacityFGEvent(const std::shared_ptr<IStats> 
         return;
     }
 
+    std::string batterySSOCPath = getCStringOrDefault(configData, "BatterySSOCPath");
+
     // Indicates an implicit disable of the battery capacity reporting
-    if (kBatterySSOCPath.empty()) {
-        return;
+    if (batterySSOCPath.empty()) {
+        ALOGV("batterySSOCPath not specified in JSON");
+        batterySSOCPath = ssoc_details_path;
     }
 
-    battery_capacity_reporter_.checkAndReport(stats_client, kBatterySSOCPath);
+    battery_capacity_reporter_.checkAndReport(stats_client, batterySSOCPath);
 }
 
 void UeventListener::ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_client) {
     std::string file_contents_vid, file_contents_pid;
     uint32_t pid, vid;
 
-    if (!ReadFileToString(kTypeCPartnerVidPath.c_str(), &file_contents_vid)) {
-        ALOGE("Unable to read %s - %s", kTypeCPartnerVidPath.c_str(), strerror(errno));
+    std::string typeCPartnerVidPath = getCStringOrDefault(configData, "TypeCPartnerVidPath");
+    std::string typeCPartnerPidPath = getCStringOrDefault(configData, "TypeCPartnerPidPath");
+
+
+    if (typeCPartnerVidPath.empty()) {
+        ALOGV("typeCPartnerVidPath not specified in JSON");
+        typeCPartnerPidPath = typec_partner_vid_path_default;
+    }
+    if (typeCPartnerPidPath.empty()) {
+        ALOGV("typeCPartnerPidPath not specified in JSON");
+        typeCPartnerPidPath = typec_partner_pid_path_default;
+    }
+
+    if (!ReadFileToString(typeCPartnerVidPath.c_str(), &file_contents_vid)) {
+        ALOGE("Unable to read %s - %s", typeCPartnerVidPath.c_str(), strerror(errno));
         return;
     }
 
     if (sscanf(file_contents_vid.c_str(), "%x", &vid) != 1) {
         ALOGE("Unable to parse vid %s from file %s to int.", file_contents_vid.c_str(),
-              kTypeCPartnerVidPath.c_str());
+              typeCPartnerVidPath.c_str());
         return;
     }
 
-    if (!ReadFileToString(kTypeCPartnerPidPath.c_str(), &file_contents_pid)) {
-        ALOGE("Unable to read %s - %s", kTypeCPartnerPidPath.c_str(), strerror(errno));
+    if (!ReadFileToString(typeCPartnerPidPath.c_str(), &file_contents_pid)) {
+        ALOGE("Unable to read %s - %s", typeCPartnerPidPath.c_str(), strerror(errno));
         return;
     }
 
     if (sscanf(file_contents_pid.substr(PID_OFFSET, PID_LENGTH).c_str(), "%x", &pid) != 1) {
         ALOGE("Unable to parse pid %s from file %s to int.",
               file_contents_pid.substr(PID_OFFSET, PID_LENGTH).c_str(),
-              kTypeCPartnerPidPath.c_str());
+              typeCPartnerPidPath.c_str());
         return;
     }
 
@@ -457,6 +514,11 @@ bool UeventListener::ProcessUevent() {
     driver = product = subsystem = NULL;
     mic_break_status = mic_degrade_status = devpath = NULL;
 
+    std::string typeCPartnerUevent = getCStringOrDefault(configData, "TypeCPartnerUevent");
+
+    if (typeCPartnerUevent.empty()) {
+        ALOGV("typeCPartnerUevent not specified in JSON");
+    }
     /**
      * msg is a sequence of null-terminated strings.
      * Iterate through and record positions of string/value pairs of interest.
@@ -481,7 +543,7 @@ bool UeventListener::ProcessUevent() {
             devpath = cp;
         } else if (!strncmp(cp, "SUBSYSTEM=", strlen("SUBSYSTEM="))) {
             subsystem = cp;
-        } else if (!strncmp(cp, kTypeCPartnerUevent.c_str(), kTypeCPartnerUevent.size())) {
+        } else if (!strncmp(cp, typeCPartnerUevent.c_str(), typeCPartnerUevent.size())) {
             collect_partner_id = true;
         } else if (!strncmp(cp, "GPU_UEVENT_TYPE=", strlen("GPU_UEVENT_TYPE="))) {
             gpu_event_type = cp;
@@ -525,45 +587,8 @@ bool UeventListener::ProcessUevent() {
     return true;
 }
 
-UeventListener::UeventListener(const std::string audio_uevent, const std::string ssoc_details_path,
-                               const std::string overheat_path,
-                               const std::string charge_metrics_path,
-                               const std::string typec_partner_vid_path,
-                               const std::string typec_partner_pid_path,
-                               const std::vector<std::string> fw_update_path,
-                               const std::vector<std::string> fg_abnl_path)
-    : kAudioUevent(audio_uevent),
-      kBatterySSOCPath(ssoc_details_path),
-      kUsbPortOverheatPath(overheat_path),
-      kChargeMetricsPath(charge_metrics_path),
-      kTypeCPartnerUevent(typec_partner_uevent_default),
-      kTypeCPartnerVidPath(typec_partner_vid_path),
-      kTypeCPartnerPidPath(typec_partner_pid_path),
-      kFwUpdatePath(fw_update_path),
-      kFGAbnlPath(fg_abnl_path),
-      uevent_fd_(-1),
-      log_fd_(-1) {}
-
-UeventListener::UeventListener(const struct UeventPaths &uevents_paths)
-    : kAudioUevent((uevents_paths.AudioUevent == nullptr) ? "" : uevents_paths.AudioUevent),
-      kBatterySSOCPath((uevents_paths.SsocDetailsPath == nullptr) ? ssoc_details_path
-                                                                  : uevents_paths.SsocDetailsPath),
-      kUsbPortOverheatPath((uevents_paths.OverheatPath == nullptr) ? overheat_path_default
-                                                                   : uevents_paths.OverheatPath),
-      kChargeMetricsPath((uevents_paths.ChargeMetricsPath == nullptr)
-                                 ? charge_metrics_path_default
-                                 : uevents_paths.ChargeMetricsPath),
-      kTypeCPartnerUevent((uevents_paths.TypeCPartnerUevent == nullptr)
-                                  ? typec_partner_uevent_default
-                                  : uevents_paths.TypeCPartnerUevent),
-      kTypeCPartnerVidPath((uevents_paths.TypeCPartnerVidPath == nullptr)
-                                   ? typec_partner_vid_path_default
-                                   : uevents_paths.TypeCPartnerVidPath),
-      kTypeCPartnerPidPath((uevents_paths.TypeCPartnerPidPath == nullptr)
-                                   ? typec_partner_pid_path_default
-                                   : uevents_paths.TypeCPartnerPidPath),
-      kFwUpdatePath(uevents_paths.FwUpdatePath),
-      kFGAbnlPath(uevents_paths.FGAbnlPath),
+UeventListener::UeventListener(const Json::Value& configData)
+    : configData(configData),
       uevent_fd_(-1),
       log_fd_(-1) {}
 
