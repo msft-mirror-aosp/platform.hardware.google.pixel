@@ -71,6 +71,7 @@ on property:ro.debuggable=1 && property:init.svc.bugreportd=stopped
 service vendor.set_max_ram_size /vendor/bin/misc_writer --set-max-ram-size ${persist.device_config.vendor_system_native_boot.max_ram_size:--1}
     disabled
     oneshot
+    user root
 
 on property:persist.device_config.vendor_system_native_boot.max_ram_size=*
     start vendor.set_max_ram_size
