@@ -72,6 +72,7 @@ cc_test {
         "aidl/SessionChannel.cpp",
         "aidl/SessionTaskMap.cpp",
         "aidl/SessionValueEntry.cpp",
+        "aidl/TaskRampupMultNode.cpp",
         "aidl/UClampVoter.cpp",
     ],
     cpp_std: "gnu++20",
@@ -143,6 +144,7 @@ cc_binary {
         "aidl/SessionChannel.cpp",
         "aidl/SessionTaskMap.cpp",
         "aidl/SessionValueEntry.cpp",
+        "aidl/TaskRampupMultNode.cpp",
     ],
     cpp_std: "gnu++20",
 }
