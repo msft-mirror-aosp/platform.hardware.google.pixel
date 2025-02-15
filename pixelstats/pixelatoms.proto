@@ -3147,7 +3147,12 @@ message CallUsageStatsReported {
   optional float average_power = 11;
 
   /* background noise level from 1 (lowest) to 12 (highest). */
-  optional float noise_level = 12;
+  optional float noise_level = 12 [deprecated = true];
+
+  // durations list of size 12 representing percentage
+  // of duration of each background noise level
+  // from -1 (lowest) to 12 (highest).
+  repeated float noise_level_percentages = 13;
 }
 
 /*
