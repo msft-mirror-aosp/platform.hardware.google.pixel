@@ -27,6 +27,7 @@ namespace pixel {
 
 using aidl::android::frameworks::stats::IStats;
 using aidl::android::frameworks::stats::VendorAtom;
+using aidl::android::frameworks::stats::VendorAtomValue;
 
 bool fileExists(const std::string &path);
 std::shared_ptr<IStats> getStatsService();
@@ -73,9 +74,12 @@ void reportSpeakerHealthStat(const std::shared_ptr<IStats> &stats_client,
 
 void reportUsbDataSessionEvent(const std::shared_ptr<IStats> &stats_client,
                                const PixelAtoms::VendorUsbDataSessionEvent &usb_session);
+
 void readLogbuffer(const std::string &buf_path, int num_fields, uint16_t code,
                    enum ReportEventFormat format, unsigned int last_check_time,
                    std::vector<std::vector<uint32_t>> &events);
+
+void setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset, int content);
 
 }  // namespace pixel
 }  // namespace google
