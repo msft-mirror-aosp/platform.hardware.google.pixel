@@ -3234,6 +3234,38 @@ message MediaPlaybackUsageStatsReported {
 
   /* Average power in milliwatts. -1 if unavailable. */
   optional float average_power = 11;
+
+  /* Sample rate used in the media playback. */
+  optional int32 sample_rate = 12;
+
+  /* Sample rate used in the media playback. */
+  optional int32 channel_count = 13;
+
+  /* Sample rate used in the media playback. */
+  optional int32 audio_format_type = 14;
+
+  /* Sample rate used in the media playback. */
+  optional int32 pcm_type = 15;
+
+  enum OffloadEncoding {
+    UNKNOWN_ENCODING = 0;
+    NO_ENCODING = 1;
+    PCM_UINT_8_BIT = 2;
+    PCM_INT_16_BIT = 3;
+    PCM_INT_24_BIT = 4;
+    PCM_FIXED_Q_8_24 = 5;
+    PCM_INT_32_BIT = 6;
+    PCM_FLOAT_32_BIT = 7;
+    MP3 = 8;
+    AAC = 9;
+    AAC_LC = 10;
+    AAC_HE_V1 = 11;
+    AAC_HE_V2 = 12;
+    OPUS = 13;
+  }
+
+  /* Offload Encoding used in the media playback. */
+  optional OffloadEncoding offload_encoding = 16;
 }
 
 /*
