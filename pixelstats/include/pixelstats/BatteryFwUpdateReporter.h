@@ -40,7 +40,6 @@ class BatteryFwUpdateReporter {
                                 const ReportEventType &event_type);
 
   private:
-    const int kVendorAtomOffset = 2;
 
     struct BatteryFwUpdatePipeline {
       int32_t msg_type;
@@ -60,7 +59,6 @@ class BatteryFwUpdateReporter {
 
     static constexpr unsigned int kNumMaxFwUpdatePaths = 2;
     unsigned int last_check_[kNumMaxFwUpdatePaths] = {0};
-    void setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset, int content);
     void reportEvent(const std::shared_ptr<IStats> &stats_client,
                      struct BatteryFwUpdatePipeline &data);
 

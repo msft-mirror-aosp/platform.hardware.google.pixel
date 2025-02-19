@@ -83,7 +83,6 @@ class BatteryFGReporter {
     unsigned int last_ab_check_ = 0;
     static constexpr unsigned int kNumMaxEvents = 8;
     unsigned int ab_trigger_time_[kNumMaxEvents] = {0};
-    void setAtomFieldValue(std::vector<VendorAtomValue> *values, int offset, int content);
     void reportFGEvent(const std::shared_ptr<IStats> &stats_client, struct BatteryFGPipeline &data);
 
     const int kNumFGPipelineFields = sizeof(BatteryFGPipeline) / sizeof(int32_t);
