@@ -84,17 +84,18 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
     values[PixelAtoms::WaterEventReported::kCollectionEventFieldNumber - kVendorAtomOffset] = event_point;
 
     // Most important, what is the state of the fuse
-    std::string fuse_state_str;
-    if (ReadFileToString(sysfs_path + "/fuse/status", &fuse_state_str)) {
-        if (!fuse_state_str.compare(0, 4, "open")) {
-            values[PixelAtoms::WaterEventReported::kFuseStateFieldNumber - kVendorAtomOffset] =
-                    PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_BLOWN;
-        } else if (!fuse_state_str.compare(0, 5, "short")) {
-            values[PixelAtoms::WaterEventReported::kFuseStateFieldNumber - kVendorAtomOffset] =
-                    PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_INTACT;
-        } else {
-             values[PixelAtoms::WaterEventReported::kFuseStateFieldNumber - kVendorAtomOffset] =
-                     PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_FUSE_STATE_UNKNOWN;
+    int fuse_state;
+    if (readFileToInt(sysfs_path + "/fuse/status", &fuse_state)) {
+        auto &fuse_state_field = values[PixelAtoms::WaterEventReported::kFuseStateFieldNumber - kVendorAtomOffset];
+        switch (fuse_state) {
+            case 1:
+                fuse_state_field = PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_BLOWN;
+                break;
+            case 0:
+                fuse_state_field = PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_INTACT;
+                break;
+            default:
+                fuse_state_field = PixelAtoms::WaterEventReported::FuseState::WaterEventReported_FuseState_FUSE_STATE_UNKNOWN;
         }
     }
 
@@ -128,27 +129,27 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
         std::string sensor_state_path = sysfs_path + "/" + sensor_path;
         sensor_state_path += (event_point == PixelAtoms::WaterEventReported::EventPoint::WaterEventReported_EventPoint_BOOT) ? "/boot_value" : "/latched_value";
 
-        std::string sensor_state_str;
-        if (!ReadFileToString(sensor_state_path, &sensor_state_str)) {
+        int sensor_state;
+        if (!readFileToInt(sensor_state_path, &sensor_state)) {
             continue;
         }
 
-        if (!sensor_state_str.compare(0, 3, "dry")) {
-             values[sensor_state_field_number - kVendorAtomOffset] =
-                     PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_DRY;
-        } else if (sensor_state_str.compare(0, 3, "wet")) {
-             values[sensor_state_field_number- kVendorAtomOffset] =
-                PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_WET;
-        } else if (!sensor_state_str.compare(0, 3, "invl")) {
-            values[sensor_state_field_number - kVendorAtomOffset] =
-                PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_INVALID;
-        } else if (!sensor_state_str.compare(0, 3, "dis")) {
-                values[sensor_state_field_number - kVendorAtomOffset] =
-                        PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_DISABLED;
-        } else {
-                values[sensor_state_field_number - kVendorAtomOffset] =
-                    PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_SENSOR_STATE_UNKNOWN;
-            continue;
+        auto &sensor_state_field = values[sensor_state_field_number - kVendorAtomOffset];
+        switch (sensor_state) {
+            case 0:
+                sensor_state_field = PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_DRY;
+                break;
+            case 1:
+                sensor_state_field = PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_WET;
+                break;
+            case 2:
+                sensor_state_field = PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_DISABLED;
+                break;
+            case 3:
+                sensor_state_field = PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_INVALID;
+                break;
+            default:
+                sensor_state_field = PixelAtoms::WaterEventReported::SensorState::WaterEventReported_SensorState_SENSOR_STATE_UNKNOWN;
         }
     }
 
