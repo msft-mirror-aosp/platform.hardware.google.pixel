@@ -202,7 +202,7 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
         ret = false;
     }
 
-    if (!ParseSensorInfo(config, &sensor_info_map_)) {
+    if (!ParseSensorInfo(config, &sensor_info_map_, cooling_device_info_map_)) {
         LOG(ERROR) << "Failed to parse sensor info config";
         ret = false;
     }
