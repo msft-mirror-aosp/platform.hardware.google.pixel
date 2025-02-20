@@ -113,11 +113,14 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
                               PixelAtoms::WaterEventReported::CircuitState::WaterEventReported_CircuitState_CIRCUIT_DISABLED;
 
     std::tuple<std::string, int, int> sensors[] = {
-        {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber, PixelAtoms::WaterEventReported::kReferenceThresholdFieldNumber},
-        {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber, PixelAtoms::WaterEventReported::kSensor0ThresholdFieldNumber},
-        {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber, PixelAtoms::WaterEventReported::kSensor1ThresholdFieldNumber},
-        {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber, PixelAtoms::WaterEventReported::kSensor1ThresholdFieldNumber}
-    };
+            {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber,
+             PixelAtoms::WaterEventReported::kReferenceThresholdMvFieldNumber},
+            {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber,
+             PixelAtoms::WaterEventReported::kSensor0ThresholdMvFieldNumber},
+            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber,
+             PixelAtoms::WaterEventReported::kSensor1ThresholdMvFieldNumber},
+            {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber,
+             PixelAtoms::WaterEventReported::kSensor1ThresholdMvFieldNumber}};
 
     //   Get the sensor states (including reference) from either the boot_value (if this is during
     //   startup), or the latched_value if this is the result of a uevent
@@ -156,7 +159,8 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
         std::string threshold_path = sysfs_path + "/" + sensor_path + "/threshold";
         int sensor_threshold;
         if (readFileToInt(threshold_path, &sensor_threshold)) {
-            values[PixelAtoms::WaterEventReported::kReferenceThresholdFieldNumber - kVendorAtomOffset] = sensor_threshold;
+            values[PixelAtoms::WaterEventReported::kReferenceThresholdMvFieldNumber -
+                   kVendorAtomOffset] = sensor_threshold;
         }
     }
 
