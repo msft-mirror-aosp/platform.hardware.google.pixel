@@ -19,6 +19,7 @@
 #include <stdlib.h>
 
 #include <iostream>
+#include <vector>
 #include <map>
 #include <memory>
 #include <optional>
@@ -262,18 +263,16 @@ int main(int argc, char** argv) {
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteDstOffset,
                                                      std::to_string(dst_offset));
     } else if (option_name == "set-trending-issue-pattern"s) {
-      if (argc != 3) {
-        std::cerr << "Not the right amount of arguements, we expect 1 argument but were provide " << argc - 2;
-        return EXIT_FAILURE;
+      std::vector<char> merged;
+      for (int j = 2 ; j < argc ; j++) {
+        for (int i = 0 ; argv[j][i] != '\0'; ++i) {
+            merged.push_back(argv[j][i]);
+        }
+        merged.push_back('\0');
       }
-      if (misc_writer) {
-        LOG(ERROR) << "Misc writer action has already been set";
-        return Usage(argv[0]);
-      } else if (sizeof(argv[2]) >= 32) {
-        std::cerr << "String is too large, we only take strings smaller than 32, but you provide " << sizeof(argv[2]);
-        return Usage(argv[0]);
-      }
-      misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, argv[2]);
+      std::string msg;
+      msg.assign(merged.begin(), merged.end());
+      misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, msg);
     } else {
       LOG(FATAL) << "Unreachable path, option_name: " << option_name;
     }
