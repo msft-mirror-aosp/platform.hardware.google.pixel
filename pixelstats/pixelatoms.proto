@@ -145,6 +145,7 @@ message Atom {
       CallUsageStatsReported call_usage_stats_reported = 105091 [(android.os.statsd.module) = "pixelaudio"];
       BatteryFirmwareUpdateReported battery_firmware_update_reported = 105092;
       QualcommBatteryGauge qualcomm_battery_gauge = 105093 [(android.os.statsd.module) = "qbg"];
+      GnssTtffReported gnss_ttff_reported = 105094 [(android.os.statsd.module) = "pixelgnss"];
     }
     // AOSP atom ID range ends at 109999
     reserved 109997; // reserved for VtsVendorAtomJavaTest test atom
@@ -3331,4 +3332,61 @@ message QualcommBatteryGauge {
   repeated int32 duration_ms = 3;
   /* The elapsed time in milliseconds, from when the final sample was taken. */
   required int64 elapsed_time_ms = 4;
+}
+
+/*
+ * A message containing a TTFF, aiding data and related satellite information.
+ * Logged from:
+ *   vendor/google/gnss/aidl_service/GnssAtomsReporter.cpp
+ *
+ * Estimated Logging Rate:
+ * Any time that user turn on location function (only first location calculated).
+ * Peak: 1 times in 3 min | Avg: 48 times per device per day
+ */
+message GnssTtffReported {
+  enum TtffType {
+    TTFF_UNKNOWN = 0;
+    TTFF_COLD = 1;
+    TTFF_WARM = 2;
+    TTFF_HOT = 3;
+  }
+  /* Vendor reverse domain name */
+  optional string reverse_domain_name = 1;
+  /* The start type at which each TTFF event was collected. */
+  optional TtffType ttff_type = 2;
+  /* Time To First Fix in milliseconds. */
+  optional int32 ttff_milliseconds = 3;
+  /* Estimated position accuracy (meters). */
+  optional int32 ttff_horizontal_position_accuracy = 4;
+  /* The number of satellites used. */
+  optional int32 ttff_used_in_fix_sv_count = 5;
+  /* The L1 satellite constellations in view. */
+  repeated int32 ttff_l1_constellation_list = 6;
+  /* The L1 satellite PRNs in view. */
+  repeated int32 ttff_l1_prn_list = 7;
+  /* The L1 CN0 for each satellite. */
+  repeated int32 ttff_l1_cn0_list = 8;
+  /* The L5 satellite constellations in view. */
+  repeated int32 ttff_l5_constellation_list = 9;
+  /* The L5 PRN satellite in view. */
+  repeated int32 ttff_l5_prn_list = 10;
+  /* The L5 CN0 for each satelltie. */
+  repeated int32 ttff_l5_cn0_list = 11;
+  /*
+   * Aiding data provided by framework.
+   * Time elapsed since a location request was initiated.
+   * Zero indicates no request/inject was made.
+   */
+  optional int32 reference_location_request_milliseconds = 12;
+  optional int32 reference_location_inject_milliseconds = 13;
+  optional int32 reference_time_request_milliseconds = 14;
+  optional int32 reference_time_inject_milliseconds = 15;
+  optional int32 supl_aiding_request_milliseconds = 16;
+  optional int32 supl_aiding_inject_milliseconds = 17;
+  optional int32 vendor_aiding_request_milliseconds = 18;
+  optional int32 vendor_aiding_inject_milliseconds = 19;
+  /* The aiding data without precise timestamp */
+  optional bool reference_frequency_used = 20;
+  optional bool almanac_used = 21;
+  optional bool ephemeris_used = 22;
 }
