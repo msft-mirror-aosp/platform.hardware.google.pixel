@@ -144,7 +144,7 @@ message Atom {
       MediaPlaybackUsageStatsReported media_playback_usage_stats_reported = 105090 [(android.os.statsd.module) = "pixelaudio"];
       CallUsageStatsReported call_usage_stats_reported = 105091 [(android.os.statsd.module) = "pixelaudio"];
       BatteryFirmwareUpdateReported battery_firmware_update_reported = 105092;
-      QualcommBatteryGauge qualcomm_battery_gauge = 105093 [(android.os.statsd.module) = "qbg"];
+      PowerFifoDump power_fifo_dump = 105093 [(android.os.statsd.module) = "pixelpower"];
       GnssTtffReported gnss_ttff_reported = 105094 [(android.os.statsd.module) = "pixelgnss"];
     }
     // AOSP atom ID range ends at 109999
@@ -3323,7 +3323,7 @@ message BatteryFirmwareUpdateReported {
  * The history window is not measured in days but rather fluctuates between
  * 100s of milliseconds and a few minutes based on the device's power state.
  */
-message QualcommBatteryGauge {
+message PowerFifoDump {
   /* Vendor reverse domain name */
   optional string reverse_domain_name = 1;
   /* The estimated milliwatts.*/
