@@ -302,8 +302,14 @@ void UeventListener::ReportTypeCPartnerId(const std::shared_ptr<IStats> &stats_c
 
 void UeventListener::ReportGpuEvent(const std::shared_ptr<IStats> &stats_client, const char *driver,
                                     const char *gpu_event_type, const char *gpu_event_info) {
-    if (!stats_client || !driver || strncmp(driver, "DRIVER=mali", strlen("DRIVER=mali")) ||
-        !gpu_event_type || !gpu_event_info)
+
+    if (!stats_client || !driver || !gpu_event_type || !gpu_event_info)
+        return;
+
+    bool isPVREvent = (strncmp(driver, "DRIVER=pvrsrvkm", strlen("DRIVER=pvrsrvkm")) == 0);
+    bool isMaliEvent = (strncmp(driver, "DRIVER=mali", strlen("DRIVER=mali")) == 0);
+
+    if (!isMaliEvent && !isPVREvent)
         return;
 
     std::vector<std::string> type = android::base::Split(gpu_event_type, "=");
@@ -315,14 +321,32 @@ void UeventListener::ReportGpuEvent(const std::shared_ptr<IStats> &stats_client,
     if (type[0] != "GPU_UEVENT_TYPE" || info[0] != "GPU_UEVENT_INFO")
         return;
 
-    auto event_type = kGpuEventTypeStrToEnum.find(type[1]);
-    auto event_info = kGpuEventInfoStrToEnum.find(info[1]);
-    if (event_type == kGpuEventTypeStrToEnum.end() || event_info == kGpuEventInfoStrToEnum.end())
-        return;
+    PixelAtoms::GpuEvent::GpuEventType event_type;
+    PixelAtoms::GpuEvent::GpuEventInfo event_info;
+
+    if (isPVREvent) {
+        auto type_iter = kPVRGpuEventTypeStrToEnum.find(type[1]);
+        auto info_iter = kPVRGpuEventInfoStrToEnum.find(info[1]);
+        if (type_iter == kPVRGpuEventTypeStrToEnum.end() || info_iter == kPVRGpuEventInfoStrToEnum.end())
+            return;
+
+        event_type = type_iter->second;
+        event_info = info_iter->second;
+    }
+
+    if (isMaliEvent) {
+        auto type_iter = kMaliGpuEventTypeStrToEnum.find(type[1]);
+        auto info_iter = kMaliGpuEventInfoStrToEnum.find(info[1]);
+        if (type_iter == kMaliGpuEventTypeStrToEnum.end() || info_iter == kMaliGpuEventInfoStrToEnum.end())
+            return;
+
+        event_type = type_iter->second;
+        event_info = info_iter->second;
+    }
 
     VendorAtom event = {.reverseDomainName = "",
                         .atomId = PixelAtoms::Atom::kGpuEvent,
-                        .values = {event_type->second, event_info->second}};
+                        .values = {event_type, event_info}};
     const ndk::ScopedAStatus ret = stats_client->reportVendorAtom(event);
     if (!ret.isOk())
         ALOGE("Unable to report GPU event.");
