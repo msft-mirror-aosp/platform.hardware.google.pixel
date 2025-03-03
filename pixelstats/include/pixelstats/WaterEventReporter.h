@@ -46,7 +46,7 @@ class WaterEventReporter {
     // store everything in the values array at the index of the field number
     // -2.
     const int kVendorAtomOffset = 2;
-    const int kNumOfWaterEventAtoms = 13;
+    const int kNumOfWaterEventAtomFields = 13;
 };
 
 }  // namespace pixel
