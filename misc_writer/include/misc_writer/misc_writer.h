@@ -76,7 +76,9 @@ class MiscWriter {
         char user_preferred_resolution[32];
         char sota_csku[8];
         char sota_csku_signature[96];
-        char reserve[32]; // not used
+        char flood_skip;
+        char flood_hit;
+        char reserve[30]; // not used
         char skipUnbootableCheck[32];
         char sota_boot[32];
         char reserve2[448]; // not used
