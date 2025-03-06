@@ -60,6 +60,7 @@ static inline int64_t ns_to_100us(int64_t ns) {
 
 static const char systemSessionCheckPath[] = "/proc/vendor_sched/is_tgid_system_ui";
 static const bool systemSessionCheckNodeExist = access(systemSessionCheckPath, W_OK) == 0;
+static constexpr int32_t kTargetDurationChangeThreshold = 30;  // Percentage change threshold
 
 }  // namespace
 
@@ -335,11 +336,16 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::updateT
     }
     targetDurationNanos = targetDurationNanos * getAdpfProfile()->mTargetTimeFactor;
 
-    // Reset session records and heuristic boost states when target duration changes.
+    // Reset session records and heuristic boost states when the percentage change of target
+    // duration is over the threshold.
     if (targetDurationNanos != mDescriptor->targetNs.count() &&
         getAdpfProfile()->mHeuristicBoostOn.has_value() &&
         getAdpfProfile()->mHeuristicBoostOn.value()) {
-        resetSessionHeuristicStates();
+        auto lastTargetNs = mDescriptor->targetNs.count();
+        if (abs(targetDurationNanos - lastTargetNs) >
+            lastTargetNs / 100 * kTargetDurationChangeThreshold) {
+            resetSessionHeuristicStates();
+        }
     }
 
     mDescriptor->targetNs = std::chrono::nanoseconds(targetDurationNanos);
@@ -593,7 +599,7 @@ ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::sendHin
                                                                adpfConfig->mStaleTimeFactor / 2.0));
                 break;
             case SessionHint::POWER_EFFICIENCY:
-                setMode(SessionMode::POWER_EFFICIENCY, true);
+                setModeLocked(SessionMode::POWER_EFFICIENCY, true);
                 break;
             case SessionHint::GPU_LOAD_UP:
                 mPSManager->voteSet(mSessionId, AdpfVoteType::GPU_LOAD_UP,
@@ -628,6 +634,12 @@ template <class HintManagerT, class PowerSessionManagerT>
 ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::setMode(SessionMode mode,
                                                                                  bool enabled) {
     std::scoped_lock lock{mPowerHintSessionLock};
+    return setModeLocked(mode, enabled);
+}
+
+template <class HintManagerT, class PowerSessionManagerT>
+ndk::ScopedAStatus PowerHintSession<HintManagerT, PowerSessionManagerT>::setModeLocked(
+        SessionMode mode, bool enabled) {
     if (mSessionClosed) {
         ALOGE("Error: session is dead");
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
