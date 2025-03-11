@@ -48,6 +48,7 @@ enum class MiscWriterActions : int32_t {
   kSetDisplayMode,
   kClearDisplayMode,
   kWriteEagleEyePatterns,
+  kWipeFloodStatus,
   kSetDisableFaceauthEval,
   kClearDisableFaceauthEval,
   kSetSotaBootFlag,
@@ -132,6 +133,8 @@ class MiscWriter {
     static constexpr char kDisplayModePrefix[] = "mode=";
     static constexpr uint32_t kEagleEyeOffset =
             offsetof(bootloader_message_vendor_t, eagleEye);
+    static constexpr uint32_t kFloodOffset =
+            offsetof(bootloader_message_vendor_t, flood_skip);
     static constexpr char kSotaBoot[] = "sota-boot=1";
     static constexpr uint32_t kSotaBootOffsetInVendorSpace =
             offsetof(bootloader_message_vendor_t, sota_boot);
