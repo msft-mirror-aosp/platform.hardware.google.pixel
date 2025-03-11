@@ -116,8 +116,7 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
     const std::tuple<std::string, int> sensors[] = {
             {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber},
             {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber},
-            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber},
-            {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber}
+            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber}
     };
 
     //   Get the sensor states (including reference) from either the boot_value (if this is during
