@@ -59,6 +59,7 @@ static int Usage(std::string_view name) {
   std::cerr << "  --set-display-mode <mode>     Write the display mode at boot\n";
   std::cerr << "  --clear-display-mode          Clear the display mode at boot\n";
   std::cerr << "  --set-trending-issue-pattern <string within 2000 byte> Write a regex string";
+  std::cerr << "  --wipe-flood-status           Clear flood status";
   std::cerr << "  --set-disable-faceauth-eval   Write disable-faceauth-eval flag\n";
   std::cerr << "  --clear-disable-faceauth-eval Clear disable-faceauth-eval flag\n";
   std::cerr << "  --set-sota-boot      Set sota boot flag\n";
@@ -93,6 +94,7 @@ int main(int argc, char** argv) {
     { "set-disable-faceauth-eval", no_argument, nullptr, 0 },
     { "clear-disable-faceauth-eval", no_argument, nullptr, 0 },
     { "set-trending-issue-pattern", required_argument, nullptr, 0 },
+    { "wipe-flood-status", no_argument, nullptr, 0 },
     { "set-sota-boot", no_argument, nullptr, 0 },
     { nullptr, 0, nullptr, 0 },
   };
@@ -273,6 +275,8 @@ int main(int argc, char** argv) {
       std::string msg;
       msg.assign(merged.begin(), merged.end());
       misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWriteEagleEyePatterns, msg);
+    } else if (option_name == "wipe-flood-status"s) {
+      misc_writer = std::make_unique<MiscWriter>(MiscWriterActions::kWipeFloodStatus, "\0\0");
     } else {
       LOG(FATAL) << "Unreachable path, option_name: " << option_name;
     }
