@@ -129,6 +129,10 @@ bool MiscWriter::PerformAction(std::optional<size_t> override_offset) {
         content = stringdata_;
         content.resize(sizeof(bootloader_message_vendor_t::eagleEye), 0);
         break;
+    case MiscWriterActions::kWipeFloodStatus:
+        offset = override_offset.value_or(kFloodOffset);
+        content = std::string(2, 0);
+        break;
     case MiscWriterActions::kSetDisableFaceauthEval:
     case MiscWriterActions::kClearDisableFaceauthEval:
         offset = override_offset.value_or(kFaceauthEvalValOffsetInVendorSpace);
