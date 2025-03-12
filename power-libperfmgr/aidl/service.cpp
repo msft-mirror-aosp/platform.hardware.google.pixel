@@ -30,11 +30,13 @@
 #include "PowerExt.h"
 #include "PowerSessionManager.h"
 #include "disp-power/DisplayLowPower.h"
+#include "utils/ThermalStateListener.h"
 
 using aidl::google::hardware::power::impl::pixel::DisplayLowPower;
 using aidl::google::hardware::power::impl::pixel::MetricUploader;
 using aidl::google::hardware::power::impl::pixel::Power;
 using aidl::google::hardware::power::impl::pixel::PowerExt;
+using aidl::google::hardware::power::impl::pixel::ThermalStateListener;
 using ::android::perfmgr::HintManager;
 
 constexpr std::string_view kPowerHalInitProp("vendor.powerhal.init");
@@ -76,6 +78,7 @@ int main() {
         HintManager::GetInstance()->Start();
         dlpw->Init();
         MetricUploader::getInstance()->init();
+        ThermalStateListener::getInstance()->init();
     });
     initThread.detach();
 
