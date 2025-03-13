@@ -2319,15 +2319,9 @@ void SysfsCollector::logWater() {
         ALOGE("Unable to get AIDL Stats service");
         return;
     }
-    std::string waterEventPath = getCStringOrDefault(configData, "WaterEventPath");
-    if (waterEventPath.empty()) {
-        ALOGV("water event path not specified in JSON");
-        return;
-    }
-
-    PixelAtoms::WaterEventReported::EventPoint event_point =
-            PixelAtoms::WaterEventReported::EventPoint::WaterEventReported_EventPoint_BOOT;
-    water_event_reporter_.logEvent(stats_client, event_point, waterEventPath);
+    std::vector<std::string> waterEventPaths =
+        readStringVectorFromJson(configData["WaterEventPaths"]);
+    water_event_reporter_.logBootEvent(stats_client, waterEventPaths);
 }
 
 void SysfsCollector::logOnce() {

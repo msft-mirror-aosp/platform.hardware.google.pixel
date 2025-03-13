@@ -116,8 +116,7 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
     const std::tuple<std::string, int> sensors[] = {
             {"reference", PixelAtoms::WaterEventReported::kReferenceStateFieldNumber},
             {"sensor0", PixelAtoms::WaterEventReported::kSensor0StateFieldNumber},
-            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber},
-            {"sensor2", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber}
+            {"sensor1", PixelAtoms::WaterEventReported::kSensor1StateFieldNumber}
     };
 
     //   Get the sensor states (including reference) from either the boot_value (if this is during
@@ -161,10 +160,20 @@ void WaterEventReporter::logEvent(const std::shared_ptr<IStats> &stats_client,
         ALOGE("Unable to report Water event.");
 }
 
+void WaterEventReporter::logBootEvent(const std::shared_ptr<IStats> &stats_client,
+                                      const std::vector<std::string> &sysfs_roots)
+{
+    ALOGD("Reporting at boot");
+    const PixelAtoms::WaterEventReported::EventPoint event_point =
+        PixelAtoms::WaterEventReported::EventPoint::WaterEventReported_EventPoint_BOOT;
+    for (const auto& sysfs_root : sysfs_roots)
+        logEvent(stats_client, event_point, sysfs_root);
+}
+
 void WaterEventReporter::logUevent(const std::shared_ptr<IStats> &stats_client,
                                    const std::string_view uevent_devpath)
 {
-    ALOGI("Reporting Water event");
+    ALOGI("Reporting at uevent");
     std::string dpath(uevent_devpath);
 
     std::vector<std::string> value = android::base::Split(dpath, "=");
