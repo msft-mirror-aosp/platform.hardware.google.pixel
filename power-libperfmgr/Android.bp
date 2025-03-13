@@ -111,6 +111,8 @@ cc_binary {
         "-Wthread-safety",
     ],
     shared_libs: [
+        "android.hardware.thermal@2.0",
+        "android.hardware.thermal-V1-ndk",
         "libbase",
         "libcutils",
         "liblog",
@@ -148,6 +150,7 @@ cc_binary {
         "aidl/SessionTaskMap.cpp",
         "aidl/SessionValueEntry.cpp",
         "aidl/TaskRampupMultNode.cpp",
+        "aidl/utils/ThermalStateListener.cpp",
     ],
     cpp_std: "gnu++20",
 }
