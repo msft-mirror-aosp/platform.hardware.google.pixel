@@ -246,6 +246,8 @@ class ThermalHelperImpl : public ThermalHelper {
     const NotificationCallback cb_;
     std::unordered_map<std::string, CdevInfo> cooling_device_info_map_;
     std::unordered_map<std::string, SensorInfo> sensor_info_map_;
+    // The target ODPM railes which will be switched by the trigger sensor
+    std::unordered_map<std::string, std::vector<std::string>> power_rail_switch_map_;
     std::unordered_map<std::string, std::unordered_map<ThrottlingSeverity, ThrottlingSeverity>>
             supported_powerhint_map_;
     PowerHalService power_hal_service_;
