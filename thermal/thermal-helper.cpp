@@ -213,9 +213,16 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
         ret = false;
     }
 
-    if (!power_files_.registerPowerRailsToWatch(config)) {
+    if (!power_files_.registerPowerRailsToWatch(config, &power_rail_switch_map_)) {
         LOG(ERROR) << "Failed to register power rails";
         ret = false;
+    }
+
+    // Check if the trigger sensor of power rails is valid
+    for (const auto &[sensor, _] : power_rail_switch_map_) {
+        if (!sensor_info_map_.contains(sensor)) {
+            LOG(FATAL) << "Power Rails's trigger sensor " << sensor << " is invalid";
+        }
     }
 
     if (!thermal_predictions_helper_.initializePredictionSensors(sensor_info_map_)) {
@@ -313,6 +320,15 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
                     } else {
                         sensor_info_map_[sensor_info.severity_reference[i]].is_watch = true;
                     }
+                }
+            }
+
+            // Pause the power rail calculation by default if it should be
+            // activated by trigger sensor
+            if (power_rail_switch_map_.contains(sensor_name)) {
+                const auto &target_rails = power_rail_switch_map_.at(sensor_name);
+                for (const auto &target_rail : target_rails) {
+                    power_files_.powerSamplingSwitch(target_rail, false);
                 }
             }
         }
@@ -1656,6 +1672,14 @@ std::chrono::milliseconds ThermalHelperImpl::thermalWatcherCallbackFunc(
                                    ? sensor_info.passive_delay
                                    : sensor_info.polling_delay;
                 sensor_status.pending_notification = false;
+
+                if (power_rail_switch_map_.contains(name_status_pair.first)) {
+                    const auto &target_rails = power_rail_switch_map_.at(name_status_pair.first);
+                    for (const auto &target_rail : target_rails) {
+                        power_files_.powerSamplingSwitch(
+                                target_rail, sensor_status.severity != ThrottlingSeverity::NONE);
+                    }
+                }
             }
         }
 

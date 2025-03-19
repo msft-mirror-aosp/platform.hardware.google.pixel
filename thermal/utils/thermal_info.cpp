@@ -1677,8 +1677,10 @@ bool ParseCoolingDevice(const Json::Value &config,
     return true;
 }
 
-bool ParsePowerRailInfo(const Json::Value &config,
-                        std::unordered_map<std::string, PowerRailInfo> *power_rails_parsed) {
+bool ParsePowerRailInfo(
+        const Json::Value &config,
+        std::unordered_map<std::string, PowerRailInfo> *power_rails_parsed,
+        std::unordered_map<std::string, std::vector<std::string>> *power_rail_switch_map) {
     Json::Value power_rails = config["PowerRails"];
     std::size_t total_parsed = 0;
     std::unordered_set<std::string> power_rails_name_parsed;
@@ -1782,6 +1784,15 @@ bool ParsePowerRailInfo(const Json::Value &config,
         } else {
             power_sample_delay =
                     std::chrono::milliseconds(getIntFromValue(power_rails[i]["PowerSampleDelay"]));
+        }
+
+        std::string trigger_sensor;
+        values = power_rails[i]["TriggerSensor"];
+        if (!values.empty()) {
+            if (values.isString()) {
+                (*power_rail_switch_map)[values.asString()].emplace_back(name);
+                LOG(INFO) << "Power rail[" << name << "]'s TriggerSensor: " << values.asString();
+            }
         }
 
         (*power_rails_parsed)[name] = {

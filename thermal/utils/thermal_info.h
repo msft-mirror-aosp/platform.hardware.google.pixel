@@ -272,8 +272,10 @@ bool ParseSensorInfo(const Json::Value &config,
                      const std::unordered_map<std::string, CdevInfo> &cooling_device_info_map_);
 bool ParseCoolingDevice(const Json::Value &config,
                         std::unordered_map<std::string, CdevInfo> *cooling_device_parsed);
-bool ParsePowerRailInfo(const Json::Value &config,
-                        std::unordered_map<std::string, PowerRailInfo> *power_rail_parsed);
+bool ParsePowerRailInfo(
+        const Json::Value &config,
+        std::unordered_map<std::string, PowerRailInfo> *power_rail_parsed,
+        std::unordered_map<std::string, std::vector<std::string>> *power_rail_switch_map);
 bool ParseSensorStatsConfig(const Json::Value &config,
                             const std::unordered_map<std::string, SensorInfo> &sensor_info_map_,
                             StatsInfo<float> *sensor_stats_info_parsed,
